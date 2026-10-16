@@ -17,17 +17,23 @@ class AppsActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val p = if (intent.getBooleanExtra("dark", true)) Palette.DARK else Palette.LIGHT
+        val p = Theme.palette(this)
         window.statusBarColor = p.bg
         val apps = Apps.all(this, refresh = true)
+
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(p.bg)
+            setPadding(dp(20), dp(14), dp(20), 0)
+        }
+        root.addView(screenHeader(p, "Apps") { finish() })
 
         val grid = GridView(this).apply {
             numColumns = 6
             verticalSpacing = dp(12)
             horizontalSpacing = dp(12)
-            setPadding(dp(20), dp(20), dp(20), dp(20))
+            setPadding(0, dp(14), 0, dp(20))
             clipToPadding = false
-            setBackgroundColor(p.bg)
             selector = android.graphics.drawable.ColorDrawable(0)
         }
         grid.adapter = object : BaseAdapter() {
@@ -60,6 +66,12 @@ class AppsActivity : Activity() {
             Apps.launch(this, apps[position])
             finish()
         }
-        setContentView(grid)
+        root.addView(grid, LinearLayout.LayoutParams(-1, 0, 1f))
+        setContentView(root)
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) hideSystemBars()
     }
 }

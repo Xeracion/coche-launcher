@@ -25,10 +25,6 @@ enum class Slot(val title: String, val keywords: List<String>) {
     RADIO("Radio", listOf("radio", "fm radio", "fm")),
     BTMUSIC("Música BT", listOf("musica bt", "bt music", "bluetooth music", "a2dp", "musica bluetooth")),
     AUTO("Android Auto", listOf("androidlink", "android link", "android auto", "zlink", "carlink", "autolink")),
-    DOCK1("Maps", listOf("maps", "google maps")),
-    DOCK2("Navi", listOf("navi")),
-    DOCK3("DSP", listOf("dsp", "ecualizador", "equalizer")),
-    DOCK4("Ajustes coche", listOf("ajustes coche", "car settings", "ajustes del coche")),
 }
 
 object Apps {
