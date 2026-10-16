@@ -339,27 +339,22 @@ class MainActivity : Activity() {
 
     private fun dockItem(c: Palette, icon: Int, description: String, iconColor: Int, accent: Boolean = false,
                          onClick: () -> Unit, onLong: (() -> Unit)? = null): View {
-        val box = FrameLayout(this).apply {
+        // Estilo baldosa: cada icono dentro de una tesela redondeada.
+        // Principales en azul con glifo blanco; herramientas en tesela neutra.
+        val box = FrameLayout(this)
+        val tile = FrameLayout(this).apply {
             contentDescription = description
-            background = cardBg(c, 22, Color.TRANSPARENT)
+            background = cardBg(c, 18, if (accent) c.accent else c.tile)
             isClickable = true
             setOnClickListener { onClick() }
             if (onLong != null) setOnLongClickListener { onLong(); true }
             springy(0.84f)
         }
-        // Los accesos principales llevan un halo suave de color detrás del icono.
-        if (accent) {
-            box.addView(View(this).apply {
-                background = GradientDrawable().apply {
-                    shape = GradientDrawable.OVAL
-                    setColor((c.accent and 0x00FFFFFF) or 0x24000000)
-                }
-            }, FrameLayout.LayoutParams(dp(54), dp(54), Gravity.CENTER))
-        }
-        box.addView(ImageView(this).apply {
+        box.addView(tile, FrameLayout.LayoutParams(dp(58), dp(58), Gravity.CENTER))
+        tile.addView(ImageView(this).apply {
             setImageResource(icon)
-            setColorFilter(iconColor, PorterDuff.Mode.SRC_IN)
-        }, FrameLayout.LayoutParams(dp(32), dp(32), Gravity.CENTER))
+            setColorFilter(if (accent) Color.WHITE else iconColor, PorterDuff.Mode.SRC_IN)
+        }, FrameLayout.LayoutParams(dp(30), dp(30), Gravity.CENTER))
         return box
     }
 
