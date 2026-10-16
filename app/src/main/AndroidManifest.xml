@@ -14,7 +14,7 @@
 
     <application
         android:label="Inicio coche"
-        android:icon="@drawable/ic_car"
+        android:icon="@drawable/ic_car_app"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
 
         <activity

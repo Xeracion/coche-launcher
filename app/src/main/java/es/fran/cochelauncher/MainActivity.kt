@@ -2,18 +2,18 @@ package es.fran.cochelauncher
 
 import android.Manifest
 import android.app.Activity
+import android.animation.ValueAnimator
 import android.app.AlertDialog
-import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
-import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.PorterDuff
+import android.graphics.Outline
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
@@ -31,10 +31,11 @@ import android.text.TextUtils
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
+import android.view.ViewOutlineProvider
+import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import java.text.SimpleDateFormat
@@ -58,8 +59,11 @@ class MainActivity : Activity() {
     private var titleView: TextView? = null
     private var artistView: TextView? = null
     private var playBtn: ImageView? = null
-    private var volBar: ProgressBar? = null
-    private var volText: TextView? = null
+    private var artView: ImageView? = null
+    private var pulse: PulseRing? = null
+    private var shownSpeed = -1
+    private var speedAnim: ValueAnimator? = null
+    private var entered = false
 
     private var controller: MediaController? = null
     private var hasMediaAccess = false
@@ -97,12 +101,6 @@ class MainActivity : Activity() {
         build()
         connectMedia()
         startSpeed()
-        try {
-            val f = IntentFilter("android.media.VOLUME_CHANGED_ACTION")
-            if (android.os.Build.VERSION.SDK_INT >= 33) registerReceiver(volReceiver, f, Context.RECEIVER_EXPORTED)
-            else registerReceiver(volReceiver, f)
-        } catch (e: Exception) {
-        }
         handler.removeCallbacks(ticker)
         handler.post(ticker)
     }
@@ -112,10 +110,7 @@ class MainActivity : Activity() {
         handler.removeCallbacks(ticker)
         disconnectMedia()
         stopSpeed()
-        try {
-            unregisterReceiver(volReceiver)
-        } catch (e: Exception) {
-        }
+        entered = false
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -139,53 +134,60 @@ class MainActivity : Activity() {
     private fun build() {
         val c = p
         root.removeAllViews()
-        root.setBackgroundColor(c.bg)
-        window.statusBarColor = c.bg
-        window.navigationBarColor = c.bg
+        root.background = Backdrop(c.dark)
+        window.statusBarColor = Color.TRANSPARENT
+        window.navigationBarColor = Color.TRANSPARENT
+        val animate = !entered
+        entered = true
 
         val main = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(24), dp(14), dp(24), dp(16))
+            setPadding(dp(26), dp(14), dp(26), dp(16))
         }
         root.addView(main, FrameLayout.LayoutParams(-1, -1))
 
-        // Cabecera: fecha y hora, discretas.
+        // Cabecera: hora a la izquierda, fecha a la derecha.
         val header = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        main.addView(header, LinearLayout.LayoutParams(-1, dp(40)))
+        main.addView(header, LinearLayout.LayoutParams(-1, dp(44)))
+        clockView = TextView(this).apply {
+            setTextColor(c.text)
+            textSize = 30f
+            typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
+            letterSpacing = 0.02f
+        }
+        header.addView(clockView)
+        header.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
         dateView = TextView(this).apply {
             setTextColor(c.sub)
             textSize = 17f
+            letterSpacing = 0.02f
         }
-        header.addView(dateView, LinearLayout.LayoutParams(0, -2, 1f))
-        clockView = TextView(this).apply {
-            setTextColor(c.text)
-            textSize = 28f
-            typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
-        }
-        header.addView(clockView)
+        header.addView(dateView)
 
         // Centro: velocidad a la izquierda, música a la derecha.
         val mid = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        main.addView(mid, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(8) })
+        main.addView(mid, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(6) })
 
         val speedBox = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
         }
-        mid.addView(speedBox, LinearLayout.LayoutParams(0, -1, 1f).apply { rightMargin = dp(16) })
+        mid.addView(speedBox, LinearLayout.LayoutParams(0, -1, 1f).apply { rightMargin = dp(18) })
         speedView = TextView(this).apply {
-            text = "--"
+            text = if (shownSpeed >= 0) shownSpeed.toString() else "--"
             setTextColor(c.text)
-            textSize = 150f
+            textSize = 144f
             typeface = Typeface.create("sans-serif-thin", Typeface.NORMAL)
             includeFontPadding = false
             gravity = Gravity.CENTER
+            letterSpacing = -0.02f
         }
         speedBox.addView(speedView)
         speedBox.addView(TextView(this).apply {
             text = "km/h"
             setTextColor(c.sub)
-            textSize = 22f
+            textSize = 20f
+            letterSpacing = 0.08f
         })
         speedHint = TextView(this).apply {
             setTextColor(c.sub)
@@ -193,24 +195,31 @@ class MainActivity : Activity() {
         }
         speedBox.addView(speedHint, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(6) })
 
-        mid.addView(buildMediaCard(c), LinearLayout.LayoutParams(0, -1, 1.2f))
+        val media = buildMediaCard(c)
+        mid.addView(media, LinearLayout.LayoutParams(0, -1, 1.5f))
 
-        // Barra inferior.
-        main.addView(buildDock(c), LinearLayout.LayoutParams(-1, dp(96)).apply { topMargin = dp(16) })
+        // Barra inferior, solo iconos.
+        val dock = buildDock(c, animate)
+        main.addView(dock, LinearLayout.LayoutParams(-1, dp(84)).apply { topMargin = dp(16) })
 
+        if (animate) {
+            speedBox.enter(0, 14)
+            media.enter(80, 20)
+        }
         tick()
         updateMedia()
-        updateVolume()
     }
 
     private fun buildMediaCard(c: Palette): View {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = cardBg(c)
-            setPadding(dp(22), dp(18), dp(22), dp(16))
+            background = cardBg(c, 30)
+            setPadding(dp(24), dp(22), dp(24), dp(20))
         }
+
+        // Carátula y datos de la canción.
         val info = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
             isClickable = true
             setOnClickListener {
                 if (!hasMediaAccess) openMediaAccessSettings()
@@ -218,54 +227,63 @@ class MainActivity : Activity() {
             }
         }
         card.addView(info, LinearLayout.LayoutParams(-1, -2))
-        info.addView(TextView(this).apply {
+        artView = ImageView(this).apply {
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            background = GradientDrawable().apply {
+                cornerRadius = dp(18).toFloat()
+                setColor(c.chip)
+            }
+            clipToOutline = true
+            outlineProvider = object : ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: Outline) {
+                    outline.setRoundRect(0, 0, view.width, view.height, dp(18).toFloat())
+                }
+            }
+        }
+        info.addView(artView, LinearLayout.LayoutParams(dp(112), dp(112)))
+        val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        info.addView(texts, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(20) })
+        texts.addView(TextView(this).apply {
             text = "Reproduciendo"
             setTextColor(c.accent)
             textSize = 13f
+            letterSpacing = 0.06f
         })
         titleView = TextView(this).apply {
             setTextColor(c.text)
-            textSize = 26f
+            textSize = 27f
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-            maxLines = 1
+            maxLines = 2
             ellipsize = TextUtils.TruncateAt.END
         }
-        info.addView(titleView, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) })
+        texts.addView(titleView, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) })
         artistView = TextView(this).apply {
             setTextColor(c.sub)
             textSize = 17f
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
         }
-        info.addView(artistView)
+        texts.addView(artistView, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(2) })
 
         card.addView(View(this), LinearLayout.LayoutParams(1, 0, 1f))
 
-        val controls = LinearLayout(this).apply { gravity = Gravity.CENTER }
-        card.addView(controls, LinearLayout.LayoutParams(-1, -2))
-        controls.addView(roundButton(c, R.drawable.ic_prev, c.bg, c.text) { mediaCmd(KeyEvent.KEYCODE_MEDIA_PREVIOUS) }, LinearLayout.LayoutParams(dp(62), dp(62)))
+        // Controles: volumen menos, anterior, reproducir, siguiente, volumen más.
+        val controls = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        card.addView(controls, LinearLayout.LayoutParams(-1, dp(104)))
+        controls.addView(roundButton(c, R.drawable.ic_vol_down, c.chip, c.sub) { changeVolume(AudioManager.ADJUST_LOWER) }, LinearLayout.LayoutParams(dp(56), dp(56)))
+        controls.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+        controls.addView(roundButton(c, R.drawable.ic_prev, c.chip, c.text) { mediaCmd(KeyEvent.KEYCODE_MEDIA_PREVIOUS) }, LinearLayout.LayoutParams(dp(64), dp(64)))
+
+        val playWrap = FrameLayout(this)
+        pulse = PulseRing(this, c.accent)
+        playWrap.addView(pulse, FrameLayout.LayoutParams(-1, -1))
         playBtn = roundButton(c, R.drawable.ic_play, c.accent, Color.WHITE) { mediaCmd(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE) }
-        controls.addView(playBtn, LinearLayout.LayoutParams(dp(76), dp(76)).apply { leftMargin = dp(28); rightMargin = dp(28) })
-        controls.addView(roundButton(c, R.drawable.ic_next, c.bg, c.text) { mediaCmd(KeyEvent.KEYCODE_MEDIA_NEXT) }, LinearLayout.LayoutParams(dp(62), dp(62)))
+        playWrap.addView(playBtn, FrameLayout.LayoutParams(dp(78), dp(78), Gravity.CENTER))
+        controls.addView(playWrap, LinearLayout.LayoutParams(dp(104), dp(104)).apply { leftMargin = dp(16); rightMargin = dp(16) })
 
-        card.addView(View(this), LinearLayout.LayoutParams(1, 0, 1f))
-
-        // Volumen.
-        val vol = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        card.addView(vol, LinearLayout.LayoutParams(-1, -2))
-        vol.addView(roundButton(c, R.drawable.ic_vol_down, c.bg, c.text) { changeVolume(AudioManager.ADJUST_LOWER) }, LinearLayout.LayoutParams(dp(54), dp(54)))
-        volBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
-            progressTintList = ColorStateList.valueOf(c.accent)
-            progressBackgroundTintList = ColorStateList.valueOf(c.sub)
-        }
-        vol.addView(volBar, LinearLayout.LayoutParams(0, dp(10), 1f).apply { leftMargin = dp(14); rightMargin = dp(14) })
-        vol.addView(roundButton(c, R.drawable.ic_vol_up, c.bg, c.text) { changeVolume(AudioManager.ADJUST_RAISE) }, LinearLayout.LayoutParams(dp(54), dp(54)))
-        volText = TextView(this).apply {
-            setTextColor(c.sub)
-            textSize = 15f
-            gravity = Gravity.END
-        }
-        vol.addView(volText, LinearLayout.LayoutParams(dp(40), -2))
+        controls.addView(roundButton(c, R.drawable.ic_next, c.chip, c.text) { mediaCmd(KeyEvent.KEYCODE_MEDIA_NEXT) }, LinearLayout.LayoutParams(dp(64), dp(64)))
+        controls.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+        controls.addView(roundButton(c, R.drawable.ic_vol_up, c.chip, c.sub) { changeVolume(AudioManager.ADJUST_RAISE) }, LinearLayout.LayoutParams(dp(56), dp(56)))
         return card
     }
 
@@ -274,70 +292,74 @@ class MainActivity : Activity() {
             setImageResource(icon)
             setColorFilter(fg, PorterDuff.Mode.SRC_IN)
             background = circleBg(c, bg)
-            setPadding(dp(15), dp(15), dp(15), dp(15))
+            setPadding(dp(16), dp(16), dp(16), dp(16))
             isClickable = true
             setOnClickListener { onClick() }
+            springy()
         }
 
-    private fun buildDock(c: Palette): View {
+    private fun buildDock(c: Palette, animate: Boolean): View {
         val dock = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
-            background = cardBg(c, 26)
-            setPadding(dp(8), dp(8), dp(8), dp(8))
+            background = cardBg(c, 32)
+            setPadding(dp(10), dp(8), dp(10), dp(8))
         }
-        val main = listOf(
+        val items = mutableListOf<View>()
+        val mainApps = listOf(
             Slot.PHONE to R.drawable.ic_phone,
             Slot.RADIO to R.drawable.ic_radio,
             Slot.BTMUSIC to R.drawable.ic_music,
             Slot.AUTO to R.drawable.ic_car,
         )
-        for ((slot, icon) in main) {
+        for ((slot, icon) in mainApps) {
             val app = Apps.resolve(this, slot)
-            dock.addView(dockItem(c, icon, slot.title, c.accent, c.text,
+            items += dockItem(c, icon, slot.title, c.accent, accent = true,
                 onClick = { Apps.launch(this, app) },
-                onLong = { pickApp(slot) }), LinearLayout.LayoutParams(0, -1, 1.15f))
+                onLong = { pickApp(slot) })
         }
-        // Separador.
-        dock.addView(View(this).apply { setBackgroundColor(c.press) }, LinearLayout.LayoutParams(dp(1), dp(48)).apply { leftMargin = dp(6); rightMargin = dp(6) })
-
         val modeName = when (Theme.mode(this)) {
-            "dark" -> "Oscuro"
-            "light" -> "Claro"
-            else -> "Auto"
+            "dark" -> "Modo oscuro fijo"
+            "light" -> "Modo claro fijo"
+            else -> "Modo automático"
         }
-        dock.addView(dockItem(c, R.drawable.ic_eq, "Sonido", c.text, c.sub, onClick = {
-            startActivity(Intent(this, SoundActivity::class.java))
-        }), LinearLayout.LayoutParams(0, -1, 1f))
-        dock.addView(dockItem(c, R.drawable.ic_theme, modeName, c.text, c.sub, onClick = { cycleTheme() }), LinearLayout.LayoutParams(0, -1, 1f))
-        dock.addView(dockItem(c, R.drawable.ic_power, "Pantalla", c.text, c.sub, onClick = {
-            startActivity(Intent(this, BlackoutActivity::class.java))
-        }), LinearLayout.LayoutParams(0, -1, 1f))
-        dock.addView(dockItem(c, R.drawable.ic_apps, "Apps", c.text, c.sub, onClick = {
-            startActivity(Intent(this, AppsActivity::class.java))
-        }), LinearLayout.LayoutParams(0, -1, 1f))
+        val tools = listOf(
+            dockItem(c, R.drawable.ic_eq, "Sonido", c.text, onClick = { startActivity(Intent(this, SoundActivity::class.java)) }),
+            dockItem(c, R.drawable.ic_theme, modeName, c.text, onClick = { cycleTheme() }),
+            dockItem(c, R.drawable.ic_power, "Apagar pantalla", c.text, onClick = { startActivity(Intent(this, BlackoutActivity::class.java)) }),
+            dockItem(c, R.drawable.ic_apps, "Todas las apps", c.text, onClick = { startActivity(Intent(this, AppsActivity::class.java)) }),
+        )
+        for (v in items) dock.addView(v, LinearLayout.LayoutParams(0, -1, 1f))
+        dock.addView(View(this).apply { setBackgroundColor(c.edge) }, LinearLayout.LayoutParams(dp(1), dp(36)).apply { leftMargin = dp(10); rightMargin = dp(10) })
+        for (v in tools) dock.addView(v, LinearLayout.LayoutParams(0, -1, 1f))
+        if (animate) {
+            (items + tools).forEachIndexed { i, v -> v.enter(140L + i * 45L) }
+        }
         return dock
     }
 
-    private fun dockItem(c: Palette, icon: Int, label: String, iconColor: Int, textColor: Int,
+    private fun dockItem(c: Palette, icon: Int, description: String, iconColor: Int, accent: Boolean = false,
                          onClick: () -> Unit, onLong: (() -> Unit)? = null): View {
-        val box = LinearLayout(this).apply {
-            gravity = Gravity.CENTER
-            orientation = LinearLayout.VERTICAL
-            background = cardBg(c, 18, c.card)
+        val box = FrameLayout(this).apply {
+            contentDescription = description
+            background = cardBg(c, 22, Color.TRANSPARENT)
             isClickable = true
             setOnClickListener { onClick() }
             if (onLong != null) setOnLongClickListener { onLong(); true }
+            springy(0.84f)
+        }
+        // Los accesos principales llevan un halo suave de color detrás del icono.
+        if (accent) {
+            box.addView(View(this).apply {
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor((c.accent and 0x00FFFFFF) or 0x24000000)
+                }
+            }, FrameLayout.LayoutParams(dp(54), dp(54), Gravity.CENTER))
         }
         box.addView(ImageView(this).apply {
             setImageResource(icon)
             setColorFilter(iconColor, PorterDuff.Mode.SRC_IN)
-        }, LinearLayout.LayoutParams(dp(34), dp(34)))
-        box.addView(TextView(this).apply {
-            text = label
-            setTextColor(textColor)
-            textSize = 14f
-            maxLines = 1
-        }, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(4) })
+        }, FrameLayout.LayoutParams(dp(32), dp(32), Gravity.CENTER))
         return box
     }
 
@@ -364,6 +386,8 @@ class MainActivity : Activity() {
 
         // Si el GPS lleva unos segundos sin dar posición, no mostramos una velocidad vieja.
         if (SystemClock.elapsedRealtime() - lastFixAt > 5_000) {
+            speedAnim?.cancel()
+            shownSpeed = -1
             speedView?.text = "--"
             speedHint?.text = if (hasLocationPermission()) "Buscando GPS" else "Sin permiso de ubicación"
         }
@@ -440,31 +464,30 @@ class MainActivity : Activity() {
         if (mps < 0) return
         var kmh = (mps * 3.6).roundToInt()
         if (kmh < 3) kmh = 0 // evita que baile parado
-        speedView?.text = kmh.toString()
         speedHint?.text = ""
+        animateSpeed(kmh)
+    }
+
+    /** La cifra cuenta hasta el valor nuevo en lugar de saltar. */
+    private fun animateSpeed(target: Int) {
+        val from = if (shownSpeed < 0) target else shownSpeed
+        speedAnim?.cancel()
+        speedAnim = ValueAnimator.ofInt(from, target).apply {
+            duration = 700
+            interpolator = DecelerateInterpolator()
+            addUpdateListener {
+                shownSpeed = it.animatedValue as Int
+                speedView?.text = shownSpeed.toString()
+            }
+            start()
+        }
     }
 
     // ---------- volumen ----------
 
-    private val volReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) = updateVolume()
-    }
-
     private fun changeVolume(direction: Int) {
         try {
             audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, direction, AudioManager.FLAG_SHOW_UI)
-        } catch (e: Exception) {
-        }
-        updateVolume()
-    }
-
-    private fun updateVolume() {
-        try {
-            val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-            val cur = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
-            volBar?.max = max
-            volBar?.progress = cur
-            volText?.text = cur.toString()
         } catch (e: Exception) {
         }
     }
@@ -533,6 +556,23 @@ class MainActivity : Activity() {
         }
         val playing = controller?.playbackState?.state == PlaybackState.STATE_PLAYING
         playBtn?.setImageResource(if (playing) R.drawable.ic_pause else R.drawable.ic_play)
+        pulse?.setActive(playing)
+
+        val art = md?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
+            ?: md?.getBitmap(MediaMetadata.METADATA_KEY_ART)
+        artView?.let { iv ->
+            if (art != null) {
+                iv.clearColorFilter()
+                iv.scaleType = ImageView.ScaleType.CENTER_CROP
+                iv.setPadding(0, 0, 0, 0)
+                iv.setImageBitmap(art)
+            } else {
+                iv.setImageResource(R.drawable.ic_music)
+                iv.scaleType = ImageView.ScaleType.FIT_CENTER
+                iv.setColorFilter(p.accent, PorterDuff.Mode.SRC_IN)
+                iv.setPadding(dp(32), dp(32), dp(32), dp(32))
+            }
+        }
     }
 
     private fun mediaCmd(keyCode: Int) {

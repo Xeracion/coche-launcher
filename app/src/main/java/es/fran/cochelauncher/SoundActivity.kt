@@ -23,10 +23,10 @@ class SoundActivity : Activity() {
         super.onCreate(savedInstanceState)
         Sound.init(this)
         p = Theme.palette(this)
-        window.statusBarColor = p.bg
+        window.statusBarColor = android.graphics.Color.TRANSPARENT
         root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(p.bg)
+            background = Backdrop(p.dark)
             setPadding(dp(20), dp(14), dp(20), dp(16))
         }
         setContentView(root)
@@ -65,7 +65,7 @@ class SoundActivity : Activity() {
                 textSize = 17f
                 gravity = Gravity.CENTER
                 setTextColor(if (sel) android.graphics.Color.WHITE else p.text)
-                background = cardBg(p, 28, if (sel) p.accent else p.card)
+                background = cardBg(p, 28, if (sel) p.accent else p.glass)
                 isClickable = true
                 setOnClickListener {
                     Sound.applyPreset(this@SoundActivity, pr)
@@ -137,7 +137,7 @@ fun Activity.screenHeader(p: Palette, title: String, onBack: () -> Unit): View {
     h.addView(ImageView(this).apply {
         setImageResource(R.drawable.ic_back)
         setColorFilter(p.text, PorterDuff.Mode.SRC_IN)
-        background = circleBg(p, p.card)
+        background = circleBg(p, p.chip)
         setPadding(dp(14), dp(14), dp(14), dp(14))
         isClickable = true
         setOnClickListener { onBack() }

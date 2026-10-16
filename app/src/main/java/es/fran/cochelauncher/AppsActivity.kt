@@ -18,12 +18,12 @@ class AppsActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val p = Theme.palette(this)
-        window.statusBarColor = p.bg
+        window.statusBarColor = android.graphics.Color.TRANSPARENT
         val apps = Apps.all(this, refresh = true)
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(p.bg)
+            background = Backdrop(p.dark)
             setPadding(dp(20), dp(14), dp(20), 0)
         }
         root.addView(screenHeader(p, "Apps") { finish() })
