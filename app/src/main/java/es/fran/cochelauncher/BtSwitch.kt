@@ -37,6 +37,10 @@ object BtSwitch {
     @Volatile private var busy = false
     private var bound = false
 
+    /** Último diagnóstico, para la pantalla de ajustes. */
+    @Volatile var lastReport = ""
+        private set
+
     private val conn = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) { binder = service }
         override fun onServiceDisconnected(name: ComponentName?) { binder = null }
@@ -113,6 +117,10 @@ object BtSwitch {
         return pkg == bt || pkg.contains("bluetooth", true) || pkg.contains(".bt", true)
     }
 
+    /** ¿Está permitido el respaldo que abre la app de fábrica? Por defecto no. */
+    private fun fallbackAllowed(ctx: Context) =
+        ctx.getSharedPreferences(Apps.PREFS, Context.MODE_PRIVATE).getBoolean("bt_fallback", false)
+
     /** Pone el canal Bluetooth y, si se pide, da al play. */
     fun warmAndPlay(ctx: Context, play: Boolean) {
         val app = ctx.applicationContext
@@ -125,10 +133,68 @@ object BtSwitch {
         h.postDelayed({
             if (requestSource(SRC_BT_AUDIO)) {
                 if (play) h.postDelayed({ sendPlay(app) }, 300)
-            } else {
+            } else if (fallbackAllowed(app)) {
                 legacyWarm(app, play)
+            } else if (play) {
+                sendPlay(app)
             }
         }, 700)
+    }
+
+    /** Prueba completa del canal, con informe legible para la pantalla de ajustes. */
+    fun diagnose(ctx: Context): String {
+        val app = ctx.applicationContext
+        val sb = StringBuilder()
+        binder = null
+        bound = false
+        connect(app)
+        val b = binder
+        sb.append(if (b == null) "Servicio de fuentes: no encontrado" else "Servicio de fuentes: encontrado")
+        if (b != null) {
+            sb.append(if (b.isBinderAlive) " y activo" else " pero caído")
+            val before = currentSource()
+            sb.append("\nFuente antes: ").append(nameOf(before))
+            val ok = try {
+                val data = Parcel.obtain()
+                val reply = Parcel.obtain()
+                try {
+                    data.writeInterfaceToken(DESCRIPTOR)
+                    data.writeInt(SRC_BT_AUDIO)
+                    data.writeInt(DISP_MAIN)
+                    data.writeInt(0)
+                    b.transact(TX_REQUEST, data, reply, 0)
+                    reply.readException()
+                    sb.append("\nOrden aceptada por la radio")
+                    true
+                } finally {
+                    data.recycle()
+                    reply.recycle()
+                }
+            } catch (e: Exception) {
+                sb.append("\nLa radio rechazó la orden: ").append(e.javaClass.simpleName)
+                false
+            }
+            if (ok) {
+                Thread.sleep(400)
+                val after = currentSource()
+                sb.append("\nFuente después: ").append(nameOf(after))
+                sb.append(if (after == SRC_BT_AUDIO) "\n\nFunciona: el canal se cambia sin abrir nada."
+                    else "\n\nLa orden pasa pero la fuente no cambia.")
+            }
+        } else {
+            sb.append("\n\nSin servicio no se puede cambiar el canal desde fuera.")
+        }
+        lastReport = sb.toString()
+        return lastReport
+    }
+
+    private fun nameOf(id: Int) = when (id) {
+        -1 -> "desconocida"
+        0 -> "ninguna"
+        SRC_FM -> "radio FM (18)"
+        21 -> "teléfono Bluetooth (21)"
+        SRC_BT_AUDIO -> "música Bluetooth (22)"
+        else -> "nº " + id
     }
 
     /** Respaldo: abrir un instante Música BT, que conmuta el canal, y volver. */

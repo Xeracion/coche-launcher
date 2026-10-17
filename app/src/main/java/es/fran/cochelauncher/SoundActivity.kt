@@ -281,6 +281,26 @@ class SoundActivity : Activity() {
         }
         c.addView(View(this), LinearLayout.LayoutParams(1, dp(28)))
 
+        c.addView(title("Canal de audio Bluetooth"))
+        c.addView(note("Comprueba si la radio deja cambiar el canal de audio desde esta app, sin abrir la pantalla de fábrica."))
+        if (btReport.isNotEmpty()) {
+            c.addView(TextView(this).apply {
+                text = btReport
+                setTextColor(p.text)
+                textSize = 15f
+                setLineSpacing(0f, 1.25f)
+                background = cardBg(p, 16, p.chip)
+                setPadding(dp(16), dp(14), dp(16), dp(14))
+            }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
+        }
+        c.addView(actionButton(if (btReport.isEmpty()) "Probar canal" else "Probar otra vez") { testBt() })
+        c.addView(View(this), LinearLayout.LayoutParams(1, dp(10)))
+        c.addView(toggleRow("Abrir Música BT si falla", "Respaldo: si la orden directa no funciona, abre un instante la app de fábrica. Apagado, nunca se abre nada.",
+            prefs.getBoolean("bt_fallback", false)) { v ->
+            prefs.edit().putBoolean("bt_fallback", v).apply()
+        })
+        c.addView(View(this), LinearLayout.LayoutParams(1, dp(28)))
+
         c.addView(title("Compartir apps de fábrica por wifi"))
         c.addView(note("Prepara un archivo con las apps de radio, teléfono y música Bluetooth del fabricante y lo ofrece en la wifi. Desde un ordenador conectado a la misma wifi, abre en el navegador la dirección que aparecerá aquí."))
         val addr = WifiShare.address()
@@ -297,6 +317,17 @@ class SoundActivity : Activity() {
             c.addView(actionButton("Compartir por wifi") { exportApps(share = true) })
             if (WifiShare.address() == null) c.addView(note("La radio no está conectada a ninguna wifi. Conéctala al punto de acceso del móvil."))
         }
+    }
+
+    private var btReport = ""
+
+    private fun testBt() {
+        btReport = "Probando…"
+        build()
+        Thread {
+            val r = try { BtSwitch.diagnose(this) } catch (e: Exception) { "Error: " + e.message }
+            runOnUiThread { btReport = r; build() }
+        }.start()
     }
 
     // ---------- actualización ----------
