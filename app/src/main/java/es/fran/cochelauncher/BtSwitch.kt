@@ -30,6 +30,7 @@ object BtSwitch {
     private const val TX_CURRENT = 6
     const val SRC_FM = 18
     const val SRC_BT_AUDIO = 22
+    const val SRC_BT_PHONE = 21
     private const val DISP_MAIN = 0
 
     private val h = Handler(Looper.getMainLooper())
@@ -282,11 +283,13 @@ object BtSwitch {
         }, 1900)
     }
 
-    fun sendPlay(ctx: Context) {
+    fun sendPlay(ctx: Context) = sendKey(ctx, KeyEvent.KEYCODE_MEDIA_PLAY)
+
+    fun sendKey(ctx: Context, code: Int) {
         try {
             val am = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-            am.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PLAY))
-            am.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PLAY))
+            am.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, code))
+            am.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, code))
         } catch (e: Exception) {
         }
     }

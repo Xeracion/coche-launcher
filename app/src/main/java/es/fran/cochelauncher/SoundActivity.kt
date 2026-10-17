@@ -233,6 +233,13 @@ class SoundActivity : Activity() {
         })
         c.addView(View(this), LinearLayout.LayoutParams(1, dp(18)))
 
+        c.addView(toggleRow("Pausar la música en llamadas", "Al entrar una llamada pausa la música del móvil, y al colgar sigue donde estaba.",
+            prefs.getBoolean("pause_call", true)) { v ->
+            prefs.edit().putBoolean("pause_call", v).apply()
+            changed()
+        })
+        c.addView(View(this), LinearLayout.LayoutParams(1, dp(18)))
+
         c.addView(toggleRow("Mantener mi pantalla al arrancar", "Si la radio planta su reproductor al encender, esta pantalla vuelve al frente durante los primeros segundos.",
             prefs.getBoolean("guard_home", true)) { v ->
             prefs.edit().putBoolean("guard_home", v).apply()

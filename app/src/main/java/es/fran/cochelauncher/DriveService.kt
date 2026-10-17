@@ -113,6 +113,7 @@ class DriveService : Service() {
         BtSwitch.connect(this)
         try { (applicationContext as Application).registerActivityLifecycleCallbacks(lifecycle) } catch (e: Exception) { }
         handler.post(brightnessLoop)
+        handler.post(callLoop)
         scheduleAutoPlay()
         scheduleHomeGuard()
     }
@@ -267,6 +268,38 @@ class DriveService : Service() {
         if (target == lastBrightTarget) return
         lastBrightTarget = target
         Brightness.fadeTo(this, target, handler)
+    }
+
+    // ---------- pausa de la música en llamadas ----------
+
+    private var pausedForCall = false
+
+    /**
+     * En una llamada, la radio pasa el canal al teléfono pero el móvil sigue
+     * reproduciendo de fondo. Vigilamos la fuente activa: al entrar la llamada
+     * pausamos la música del móvil y al colgar la reanudamos.
+     */
+    private val callLoop = object : Runnable {
+        override fun run() {
+            try {
+                if (prefs.getBoolean("pause_call", true)) {
+                    val src = BtSwitch.currentSource()
+                    if (src == BtSwitch.SRC_BT_PHONE && !pausedForCall) {
+                        if (audio.isMusicActive) {
+                            BtSwitch.sendKey(this@DriveService, KeyEvent.KEYCODE_MEDIA_PAUSE)
+                            Diag.append(this@DriveService, "llamada: pauso la música")
+                        }
+                        pausedForCall = true
+                    } else if (src != BtSwitch.SRC_BT_PHONE && src != -1 && pausedForCall) {
+                        pausedForCall = false
+                        Diag.append(this@DriveService, "llamada terminada: reanudo")
+                        handler.postDelayed({ BtSwitch.sendPlay(this@DriveService) }, 1_200)
+                    }
+                }
+            } catch (e: Exception) {
+            }
+            handler.postDelayed(this, 1_500)
+        }
     }
 
     // ---------- 3. Arranque inteligente ----------
