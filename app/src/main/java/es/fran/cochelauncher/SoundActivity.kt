@@ -341,6 +341,24 @@ class SoundActivity : Activity() {
             c.addView(actionButton("Compartir por wifi") { exportApps(share = true) })
             if (WifiShare.address() == null) c.addView(note("La radio no está conectada a ninguna wifi. Conéctala al punto de acceso del móvil."))
         }
+
+        c.addView(View(this), LinearLayout.LayoutParams(1, dp(28)))
+        c.addView(title("Registro del arranque"))
+        c.addView(note("Apunta lo que hace la app al encender el coche. Tras arrancar, entra aquí y hazle una foto a esto."))
+        c.addView(TextView(this).apply {
+            text = Diag.read(this@SoundActivity)
+            setTextColor(p.text)
+            textSize = 13f
+            typeface = android.graphics.Typeface.MONOSPACE
+            setLineSpacing(0f, 1.15f)
+            background = cardBg(p, 16, p.chip)
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+        }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
+        val row = LinearLayout(this)
+        row.addView(actionButton("Actualizar") { build() })
+        row.addView(View(this), LinearLayout.LayoutParams(dp(12), 1))
+        row.addView(actionButton("Borrar") { Diag.clear(this); build() })
+        c.addView(row)
     }
 
     private var btReport = ""

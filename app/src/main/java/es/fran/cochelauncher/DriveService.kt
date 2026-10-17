@@ -52,6 +52,9 @@ class DriveService : Service() {
         /** El usuario ha abierto una app desde nuestro inicio: el vigilante le deja en paz. */
         @Volatile var userNavigatedAway = false
 
+        /** Momento del último encendido o arranque. */
+        @Volatile var wakeAt = 0L
+
         fun start(ctx: Context, refresh: Boolean = false) {
             val i = Intent(ctx, DriveService::class.java)
             if (refresh) i.action = ACTION_REFRESH
@@ -74,8 +77,17 @@ class DriveService : Service() {
     @Volatile private var ownUiVisible = false
 
     private val lifecycle = object : Application.ActivityLifecycleCallbacks {
-        override fun onActivityResumed(a: Activity) { ownUiVisible = true }
-        override fun onActivityPaused(a: Activity) { ownUiVisible = false }
+        override fun onActivityResumed(a: Activity) {
+            ownUiVisible = true
+            Diag.append(a, "visible " + a.javaClass.simpleName)
+        }
+
+        override fun onActivityPaused(a: Activity) {
+            ownUiVisible = false
+            Diag.append(a, "oculta " + a.javaClass.simpleName)
+            // Algo nos ha tapado: si fue solo y estamos cerca del arranque, reaccionamos.
+            maybeReact()
+        }
         override fun onActivityCreated(a: Activity, b: android.os.Bundle?) {}
         override fun onActivityStarted(a: Activity) {}
         override fun onActivityStopped(a: Activity) {}
@@ -91,6 +103,8 @@ class DriveService : Service() {
         super.onCreate()
         prefs = getSharedPreferences(Apps.PREFS, Context.MODE_PRIVATE)
         audio = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        wakeAt = SystemClock.uptimeMillis()
+        Diag.append(this, "servicio creado")
         goForeground()
         registerReceivers()
         Sound.init(this)
@@ -259,6 +273,8 @@ class DriveService : Service() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
                 Intent.ACTION_SCREEN_ON -> {
+                    Diag.append(context, "pantalla encendida")
+                    wakeAt = SystemClock.uptimeMillis()
                     autoDoneThisWake = false
                     lastBrightTarget = -1
                     applyBrightness()
@@ -268,6 +284,7 @@ class DriveService : Service() {
                     handler.postDelayed({ if (phoneOnUsb()) phoneConnected() }, 2_000)
                 }
                 Intent.ACTION_SCREEN_OFF -> {
+                    Diag.append(context, "pantalla apagada")
                     autoDoneThisWake = false
                     pendingAuto = false
                     restoreBaseVolume()
@@ -326,8 +343,21 @@ class DriveService : Service() {
     private val guardToken = Any()
     private var guardYanks = 0
 
-    private fun scheduleHomeGuard() {
+    /** Reacción inmediata: si algo nos tapa sin que lo hayas abierto tú, volvemos en 2,5 s. */
+    private fun maybeReact() {
         if (!prefs.getBoolean("guard_home", true)) return
+        if (SystemClock.uptimeMillis() - wakeAt > 90_000) return
+        if (userNavigatedAway || autoDoneThisWake) return
+        Diag.append(this, "vigilante: reviso en 2,5 s")
+        handler.postAtTime({ guardCheck() }, guardToken, SystemClock.uptimeMillis() + 2_500)
+    }
+
+    private fun scheduleHomeGuard() {
+        if (!prefs.getBoolean("guard_home", true)) {
+            Diag.append(this, "vigilante desactivado en ajustes")
+            return
+        }
+        Diag.append(this, "vigilante armado")
         userNavigatedAway = false
         guardYanks = 0
         handler.removeCallbacksAndMessages(guardToken)
@@ -341,13 +371,19 @@ class DriveService : Service() {
     }
 
     private fun guardCheck() {
-        if (ownUiVisible || guardYanks >= 3) return
+        if (ownUiVisible) return
+        if (guardYanks >= 3) {
+            Diag.append(this, "vigilante: tope de intentos alcanzado")
+            return
+        }
         // Si has abierto algo tú, o Android Auto entró por el cable, no nos metemos.
         if (userNavigatedAway || autoDoneThisWake) {
+            Diag.append(this, "vigilante: te dejo, lo abriste tú")
             handler.removeCallbacksAndMessages(guardToken)
             return
         }
         guardYanks++
+        Diag.append(this, "vigilante: traigo el inicio al frente ($guardYanks)")
         try {
             startActivity(
                 Intent(this, MainActivity::class.java)
