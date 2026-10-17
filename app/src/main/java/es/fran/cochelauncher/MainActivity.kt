@@ -70,6 +70,10 @@ class MainActivity : Activity() {
 
     private var lastFix: Location? = null
     private var lastFixAt = 0L
+    private var weatherBox: LinearLayout? = null
+    private var weatherIcon: ImageView? = null
+    private var weatherTemp: TextView? = null
+    private var weatherNote: TextView? = null
     private var speedBox: LinearLayout? = null
     private var moving = false
     private var slowSince = 0L
@@ -95,6 +99,7 @@ class MainActivity : Activity() {
         dark = Theme.isDark(this)
         build()
         askLocationOnce()
+        DriveService.start(this)
     }
 
     override fun onResume() {
@@ -105,12 +110,18 @@ class MainActivity : Activity() {
         build()
         connectMedia()
         startSpeed()
+        DriveService.onPhoneConnected = { launchAuto() }
+        if (DriveService.pendingAuto && !DriveService.autoDoneThisWake) {
+            handler.postDelayed({ launchAuto() }, 800)
+        }
+        refreshWeather()
         handler.removeCallbacks(ticker)
         handler.post(ticker)
     }
 
     override fun onPause() {
         super.onPause()
+        DriveService.onPhoneConnected = null
         handler.removeCallbacks(ticker)
         disconnectMedia()
         stopSpeed()
@@ -130,6 +141,7 @@ class MainActivity : Activity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         startSpeed()
+        DriveService.start(this)
         tick()
     }
 
@@ -161,6 +173,28 @@ class MainActivity : Activity() {
         }
         header.addView(clockView)
         header.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+
+        // El tiempo: solo aparece si hay internet.
+        weatherBox = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            visibility = View.GONE
+        }
+        header.addView(weatherBox, LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(22) })
+        weatherNote = TextView(this).apply {
+            setTextColor(c.accent)
+            textSize = 16f
+        }
+        weatherBox!!.addView(weatherNote, LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(14) })
+        weatherIcon = ImageView(this).apply { setColorFilter(c.text, PorterDuff.Mode.SRC_IN) }
+        weatherBox!!.addView(weatherIcon, LinearLayout.LayoutParams(dp(26), dp(26)))
+        weatherTemp = TextView(this).apply {
+            setTextColor(c.text)
+            textSize = 20f
+            typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
+        }
+        weatherBox!!.addView(weatherTemp, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(8) })
+        Weather.last?.let { showWeather(it) }
+
         dateView = TextView(this).apply {
             setTextColor(c.sub)
             textSize = 17f
@@ -333,7 +367,7 @@ class MainActivity : Activity() {
             else -> "Modo automático"
         }
         val tools = listOf(
-            dockItem(c, R.drawable.ic_eq, "Sonido", c.text, onClick = { startActivity(Intent(this, SoundActivity::class.java)) }),
+            dockItem(c, R.drawable.ic_eq, "Ajustes", c.text, onClick = { startActivity(Intent(this, SoundActivity::class.java)) }),
             dockItem(c, R.drawable.ic_theme, modeName, c.text, onClick = { cycleTheme() }),
             dockItem(c, R.drawable.ic_power, "Apagar pantalla", c.text, onClick = { startActivity(Intent(this, BlackoutActivity::class.java)) }),
             dockItem(c, R.drawable.ic_apps, "Todas las apps", c.text, onClick = { startActivity(Intent(this, AppsActivity::class.java)) }),
@@ -393,6 +427,7 @@ class MainActivity : Activity() {
         if (moving && SystemClock.elapsedRealtime() - lastFixAt > 6_000) setMoving(false)
 
         ticks++
+        if (ticks % 150 == 0) refreshWeather()
         if (ticks % 15 == 0) {
             val newDark = Theme.isDark(this)
             if (newDark != dark) {
@@ -400,6 +435,40 @@ class MainActivity : Activity() {
                 build()
             }
         }
+    }
+
+    // ---------- tiempo ----------
+
+    private fun refreshWeather() {
+        Weather.refresh(this) { now -> if (now != null) showWeather(now) else weatherBox?.visibility = View.GONE }
+    }
+
+    private fun showWeather(w: Weather.Now) {
+        // Si el dato tiene más de 2 horas (sin conexión desde entonces), no lo enseñamos.
+        if (System.currentTimeMillis() - w.fetchedAt > 2 * 3600_000) {
+            weatherBox?.visibility = View.GONE
+            return
+        }
+        weatherIcon?.setImageResource(w.icon)
+        weatherTemp?.text = "${w.tempC}°"
+        weatherNote?.text = w.rainNote ?: ""
+        weatherNote?.visibility = if (w.rainNote != null) View.VISIBLE else View.GONE
+        weatherBox?.let { box ->
+            if (box.visibility != View.VISIBLE) {
+                box.visibility = View.VISIBLE
+                box.alpha = 0f
+                box.animate().alpha(1f).setDuration(600).start()
+            }
+        }
+    }
+
+    // ---------- Android Auto al conectar el móvil ----------
+
+    private fun launchAuto() {
+        if (DriveService.autoDoneThisWake) return
+        DriveService.autoDoneThisWake = true
+        DriveService.pendingAuto = false
+        Apps.launch(this, Apps.resolve(this, Slot.AUTO))
     }
 
     private fun cycleTheme() {
@@ -415,6 +484,7 @@ class MainActivity : Activity() {
             else -> "Automático: oscuro de la puesta al amanecer"
         }
         Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+        DriveService.start(this, refresh = true)
         dark = Theme.isDark(this)
         build()
     }
