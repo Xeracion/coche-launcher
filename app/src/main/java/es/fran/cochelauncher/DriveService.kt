@@ -79,6 +79,8 @@ class DriveService : Service() {
     private val lifecycle = object : Application.ActivityLifecycleCallbacks {
         override fun onActivityResumed(a: Activity) {
             ownUiVisible = true
+            // Si vuelves a nuestro inicio, la defensa se rearma.
+            if (a is MainActivity) userNavigatedAway = false
             Diag.append(a, "visible " + a.javaClass.simpleName)
         }
 
@@ -343,10 +345,13 @@ class DriveService : Service() {
     private val guardToken = Any()
     private var guardYanks = 0
 
-    /** Reacción inmediata: si algo nos tapa sin que lo hayas abierto tú, volvemos en 2,5 s. */
+    /**
+     * Reacción inmediata y permanente: si algo nos tapa sin que lo hayas abierto tú,
+     * volvemos en 2,5 s. La radio reabre su reproductor una y otra vez, así que
+     * la defensa no caduca; solo descansa cuando eres tú quien abre una app.
+     */
     private fun maybeReact() {
         if (!prefs.getBoolean("guard_home", true)) return
-        if (SystemClock.uptimeMillis() - wakeAt > 90_000) return
         if (userNavigatedAway || autoDoneThisWake) return
         Diag.append(this, "vigilante: reviso en 2,5 s")
         handler.postAtTime({ guardCheck() }, guardToken, SystemClock.uptimeMillis() + 2_500)
@@ -370,18 +375,20 @@ class DriveService : Service() {
         }
     }
 
+    private var lastYankAt = 0L
+
     private fun guardCheck() {
         if (ownUiVisible) return
-        if (guardYanks >= 3) {
-            Diag.append(this, "vigilante: tope de intentos alcanzado")
-            return
-        }
         // Si has abierto algo tú, o Android Auto entró por el cable, no nos metemos.
         if (userNavigatedAway || autoDoneThisWake) {
             Diag.append(this, "vigilante: te dejo, lo abriste tú")
             handler.removeCallbacksAndMessages(guardToken)
             return
         }
+        // Como mínimo 8 s entre intervenciones, para no convertirlo en una pelea.
+        val now = SystemClock.uptimeMillis()
+        if (now - lastYankAt < 8_000) return
+        lastYankAt = now
         guardYanks++
         Diag.append(this, "vigilante: traigo el inicio al frente ($guardYanks)")
         try {
