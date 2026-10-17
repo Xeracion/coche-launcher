@@ -41,29 +41,43 @@ object BtSwitch {
     @Volatile var lastReport = ""
         private set
 
+    /** Qué devolvió bindService la última vez: 1 sí, 0 no, -1 sin intentar. */
+    @Volatile private var bindResult = -1
+
     private val conn = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) { binder = service }
         override fun onServiceDisconnected(name: ComponentName?) { binder = null }
     }
 
-    /** Se conecta al gestor de fuentes de fábrica. Se llama al arrancar. */
+    /** Se conecta al gestor de fuentes de fábrica. La conexión tarda un instante en llegar. */
     fun connect(ctx: Context) {
         if (binder != null || bound) return
         val app = ctx.applicationContext
         try {
             val i = Intent("com.hzbhd.midware.service.sourcemanager").setPackage("com.hzbhd.service.sourcemanager")
             bound = app.bindService(i, conn, Context.BIND_AUTO_CREATE)
+            bindResult = if (bound) 1 else 0
         } catch (e: Exception) {
             bound = false
+            bindResult = 0
         }
         if (!bound) {
-            // Plan B: pedirlo al registro de servicios del sistema.
+            // Plan B: pedirlo al registro de servicios del sistema (puede estar bloqueado en Android 12).
             try {
                 val sm = Class.forName("android.os.ServiceManager")
                 binder = sm.getMethod("getService", String::class.java).invoke(null, "hzbhd_SourceService") as IBinder?
             } catch (e: Throwable) {
             }
         }
+    }
+
+    /** Espera a que llegue la conexión. Solo desde un hilo secundario. */
+    private fun awaitBinder(ms: Long): IBinder? {
+        val deadline = System.currentTimeMillis() + ms
+        while (binder == null && System.currentTimeMillis() < deadline) {
+            try { Thread.sleep(60) } catch (e: InterruptedException) { break }
+        }
+        return binder
     }
 
     /** Fuente de audio activa, o -1 si no se puede saber. */
@@ -125,64 +139,72 @@ object BtSwitch {
     fun warmAndPlay(ctx: Context, play: Boolean) {
         val app = ctx.applicationContext
         connect(app)
+        attempt(app, play, 0)
+    }
+
+    /** Reintenta mientras llega la conexión con el servicio de fábrica. */
+    private fun attempt(app: Context, play: Boolean, tries: Int) {
         if (requestSource(SRC_BT_AUDIO)) {
             if (play) h.postDelayed({ sendPlay(app) }, 300)
             return
         }
-        // Si el binder aún no estaba listo, reintentamos una vez en un momento.
-        h.postDelayed({
-            if (requestSource(SRC_BT_AUDIO)) {
-                if (play) h.postDelayed({ sendPlay(app) }, 300)
-            } else if (fallbackAllowed(app)) {
-                legacyWarm(app, play)
-            } else if (play) {
-                sendPlay(app)
-            }
-        }, 700)
+        if (tries < 4) {
+            h.postDelayed({ attempt(app, play, tries + 1) }, 500L * (tries + 1))
+            return
+        }
+        if (fallbackAllowed(app)) legacyWarm(app, play) else if (play) sendPlay(app)
     }
 
-    /** Prueba completa del canal, con informe legible para la pantalla de ajustes. */
+    /** Prueba completa del canal, con informe legible. Llamar desde un hilo secundario. */
     fun diagnose(ctx: Context): String {
         val app = ctx.applicationContext
         val sb = StringBuilder()
-        binder = null
-        bound = false
         connect(app)
-        val b = binder
-        sb.append(if (b == null) "Servicio de fuentes: no encontrado" else "Servicio de fuentes: encontrado")
-        if (b != null) {
-            sb.append(if (b.isBinderAlive) " y activo" else " pero caído")
-            val before = currentSource()
-            sb.append("\nFuente antes: ").append(nameOf(before))
-            val ok = try {
-                val data = Parcel.obtain()
-                val reply = Parcel.obtain()
-                try {
-                    data.writeInterfaceToken(DESCRIPTOR)
-                    data.writeInt(SRC_BT_AUDIO)
-                    data.writeInt(DISP_MAIN)
-                    data.writeInt(0)
-                    b.transact(TX_REQUEST, data, reply, 0)
-                    reply.readException()
-                    sb.append("\nOrden aceptada por la radio")
-                    true
-                } finally {
-                    data.recycle()
-                    reply.recycle()
-                }
-            } catch (e: Exception) {
-                sb.append("\nLa radio rechazó la orden: ").append(e.javaClass.simpleName)
-                false
+        val b = awaitBinder(4000)
+        sb.append("Conexión con el servicio: ")
+        sb.append(
+            when {
+                b != null && bindResult == 1 -> "correcta"
+                b != null -> "correcta (por el registro del sistema)"
+                bindResult == 1 -> "aceptada pero sin respuesta en 4 s"
+                else -> "rechazada por la radio"
+            },
+        )
+        if (b == null) {
+            sb.append("\n\nSin conexión no se puede cambiar el canal desde fuera.")
+            lastReport = sb.toString()
+            return lastReport
+        }
+        val before = currentSource()
+        sb.append("\nFuente antes: ").append(nameOf(before))
+        val ok = try {
+            val data = Parcel.obtain()
+            val reply = Parcel.obtain()
+            try {
+                data.writeInterfaceToken(DESCRIPTOR)
+                data.writeInt(SRC_BT_AUDIO)
+                data.writeInt(DISP_MAIN)
+                data.writeInt(0)
+                b.transact(TX_REQUEST, data, reply, 0)
+                reply.readException()
+                sb.append("\nOrden aceptada")
+                true
+            } finally {
+                data.recycle()
+                reply.recycle()
             }
-            if (ok) {
-                Thread.sleep(400)
-                val after = currentSource()
-                sb.append("\nFuente después: ").append(nameOf(after))
-                sb.append(if (after == SRC_BT_AUDIO) "\n\nFunciona: el canal se cambia sin abrir nada."
-                    else "\n\nLa orden pasa pero la fuente no cambia.")
-            }
-        } else {
-            sb.append("\n\nSin servicio no se puede cambiar el canal desde fuera.")
+        } catch (e: Exception) {
+            sb.append("\nLa radio rechazó la orden: ").append(e.javaClass.simpleName)
+            false
+        }
+        if (ok) {
+            try { Thread.sleep(500) } catch (e: InterruptedException) { }
+            val after = currentSource()
+            sb.append("\nFuente después: ").append(nameOf(after))
+            sb.append(
+                if (after == SRC_BT_AUDIO) "\n\nFunciona: el canal cambia sin abrir nada."
+                else "\n\nLa orden pasa pero la fuente no cambia.",
+            )
         }
         lastReport = sb.toString()
         return lastReport
