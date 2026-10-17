@@ -76,6 +76,7 @@ class DriveService : Service() {
         goForeground()
         registerReceivers()
         Sound.init(this)
+        BtSwitch.connect(this)
         handler.post(brightnessLoop)
         scheduleAutoPlay()
     }
@@ -292,7 +293,7 @@ class DriveService : Service() {
         handler.postDelayed({
             if (prefs.getBoolean("auto_aa", false) && phoneOnUsb()) return@postDelayed
             BtSwitch.warmAndPlay(this, play = !audio.isMusicActive)
-        }, 8_000)
+        }, 4_000)
     }
 
     /**
