@@ -309,6 +309,8 @@ class SoundActivity : Activity() {
             }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
         }
         c.addView(actionButton(if (btReport.isEmpty()) "Probar canal" else "Probar otra vez") { testBt() })
+        c.addView(note("La prueba completa pasa un segundo a la radio FM y vuelve, para comprobar el cambio de verdad. Sonará un momento."))
+        c.addView(actionButton("Prueba completa") { testBt(round = true) })
         c.addView(View(this), LinearLayout.LayoutParams(1, dp(10)))
         c.addView(toggleRow("Abrir Música BT si falla", "Respaldo: si la orden directa no funciona, abre un instante la app de fábrica. Apagado, nunca se abre nada.",
             prefs.getBoolean("bt_fallback", false)) { v ->
@@ -336,11 +338,13 @@ class SoundActivity : Activity() {
 
     private var btReport = ""
 
-    private fun testBt() {
+    private fun testBt(round: Boolean = false) {
         btReport = "Probando…"
         build()
         Thread {
-            val r = try { BtSwitch.diagnose(this) } catch (e: Exception) { "Error: " + e.message }
+            val r = try {
+                if (round) BtSwitch.diagnoseRoundTrip(this) else BtSwitch.diagnose(this)
+            } catch (e: Exception) { "Error: " + e.message }
             runOnUiThread { btReport = r; build() }
         }.start()
     }

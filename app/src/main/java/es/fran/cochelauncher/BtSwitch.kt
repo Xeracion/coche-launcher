@@ -210,6 +210,35 @@ object BtSwitch {
         return lastReport
     }
 
+    /** Prueba de ida y vuelta: pasa a FM y vuelve a Bluetooth. Demuestra el cambio real. */
+    fun diagnoseRoundTrip(ctx: Context): String {
+        val app = ctx.applicationContext
+        val sb = StringBuilder()
+        connect(app)
+        val b = awaitBinder(4000)
+        if (b == null) {
+            lastReport = "Conexión con el servicio: rechazada por la radio"
+            return lastReport
+        }
+        val start = currentSource()
+        sb.append("Fuente de partida: ").append(nameOf(start))
+        val other = if (start == SRC_FM) SRC_BT_AUDIO else SRC_FM
+        requestSource(other)
+        try { Thread.sleep(900) } catch (e: InterruptedException) { }
+        val mid = currentSource()
+        sb.append("\nTras pedir ").append(nameOf(other)).append(": ").append(nameOf(mid))
+        requestSource(SRC_BT_AUDIO)
+        try { Thread.sleep(900) } catch (e: InterruptedException) { }
+        val end = currentSource()
+        sb.append("\nTras volver a Bluetooth: ").append(nameOf(end))
+        sb.append(
+            if (mid == other && end == SRC_BT_AUDIO) "\n\nCambio real confirmado en ambos sentidos."
+            else "\n\nLa orden pasa pero la fuente no se mueve como debería.",
+        )
+        lastReport = sb.toString()
+        return lastReport
+    }
+
     private fun nameOf(id: Int) = when (id) {
         -1 -> "desconocida"
         0 -> "ninguna"
