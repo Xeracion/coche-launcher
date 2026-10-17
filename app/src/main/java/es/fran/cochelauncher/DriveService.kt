@@ -4,11 +4,7 @@ import android.Manifest
 import android.app.Activity
 import android.app.Application
 import android.app.Notification
-import android.app.Activity
-import android.app.Application
 import android.app.NotificationChannel
-import android.app.Activity
-import android.app.Application
 import android.app.NotificationManager
 import android.app.Service
 import android.hardware.usb.UsbConstants
