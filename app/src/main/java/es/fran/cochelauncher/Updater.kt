@@ -1,10 +1,13 @@
 package es.fran.cochelauncher
 
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.provider.MediaStore
+import android.provider.Settings
 import androidx.core.content.FileProvider
 import org.json.JSONObject
 import java.io.File
@@ -53,7 +56,7 @@ object Updater {
     }
 
     /** Descarga el APK y abre el instalador. onProgress va de 0 a 100, o -1 si falla. */
-    fun download(ctx: Context, release: Release, onProgress: (Int) -> Unit) {
+    fun download(ctx: Context, release: Release, onError: (String) -> Unit = {}, onProgress: (Int) -> Unit) {
         val app = ctx.applicationContext
         Thread {
             try {
@@ -91,9 +94,11 @@ object Updater {
                     }
                 }
                 conn.disconnect()
+                copyToDownloads(app, out)
+                val err = install(app, out)
                 main.post {
                     onProgress(100)
-                    install(app, out)
+                    if (err != null) onError(err)
                 }
             } catch (e: Exception) {
                 main.post { onProgress(-1) }
@@ -101,15 +106,74 @@ object Updater {
         }.start()
     }
 
-    private fun install(ctx: Context, apk: File) {
+    /** ¿Tiene permiso para instalar apps? */
+    fun canInstall(ctx: Context): Boolean = try {
+        ctx.packageManager.canRequestPackageInstalls()
+    } catch (e: Exception) {
+        false
+    }
+
+    /** Abre la pantalla donde se concede ese permiso. */
+    fun openInstallPermission(ctx: Context) {
         try {
-            val uri: Uri = FileProvider.getUriForFile(ctx, ctx.packageName + ".files", apk)
             ctx.startActivity(
-                Intent(Intent.ACTION_VIEW)
-                    .setDataAndType(uri, "application/vnd.android.package-archive")
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION),
+                Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + ctx.packageName))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
             )
         } catch (e: Exception) {
+            try {
+                ctx.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            } catch (e2: Exception) {
+            }
         }
+    }
+
+    /** Lanza el instalador. Devuelve null si fue bien, o el motivo del fallo. */
+    fun install(ctx: Context, apk: File): String? {
+        if (!apk.exists() || apk.length() < 100_000) return "el archivo descargado está incompleto"
+        val uri: Uri = try {
+            FileProvider.getUriForFile(ctx, ctx.packageName + ".files", apk)
+        } catch (e: Exception) {
+            return "no se pudo preparar el archivo (" + e.javaClass.simpleName + ")"
+        }
+        val intent = Intent(Intent.ACTION_VIEW)
+            .setDataAndType(uri, "application/vnd.android.package-archive")
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        try {
+            ctx.startActivity(intent)
+            return null
+        } catch (e: Exception) {
+            // Segundo intento con la acción antigua de instalación.
+            try {
+                @Suppress("DEPRECATION")
+                ctx.startActivity(
+                    Intent(Intent.ACTION_INSTALL_PACKAGE)
+                        .setData(uri)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION),
+                )
+                return null
+            } catch (e2: Exception) {
+                return "la radio no abrió el instalador (" + e2.javaClass.simpleName + ")"
+            }
+        }
+    }
+
+    /** Copia de seguridad en Descargas, para poder instalarla a mano si hace falta. */
+    private fun copyToDownloads(ctx: Context, apk: File) {
+        try {
+            val values = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, "InicioCoche.apk")
+                put(MediaStore.MediaColumns.MIME_TYPE, "application/vnd.android.package-archive")
+            }
+            val uri = ctx.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return
+            ctx.contentResolver.openOutputStream(uri)?.use { out -> apk.inputStream().use { it.copyTo(out) } }
+        } catch (e: Exception) {
+        }
+    }
+
+    /** El APK ya descargado, si existe. */
+    fun downloaded(ctx: Context): File? {
+        val f = File(ctx.applicationContext.cacheDir, "update.apk")
+        return if (f.exists() && f.length() > 100_000) f else null
     }
 }

@@ -264,7 +264,22 @@ class SoundActivity : Activity() {
         val st = updateState
         when {
             st.startsWith("buscando") -> c.addView(note("Buscando…"))
-            st.startsWith("bajando") -> c.addView(note("Descargando… " + st.removePrefix("bajando ") + " %"))
+            st.startsWith("bajando") -> {
+                c.addView(note("Descargando… " + st.removePrefix("bajando ") + " %"))
+                if (st == "bajando 100") {
+                    c.addView(note("Si no aparece el instalador, usa el botón de abajo."))
+                    c.addView(actionButton("Instalar ahora") { installNow() })
+                }
+            }
+            st.startsWith("fallo ") -> {
+                c.addView(note("No se pudo instalar: " + st.removePrefix("fallo ") + "."))
+                if (!Updater.canInstall(this)) {
+                    c.addView(note("Falta darle permiso para instalar apps."))
+                    c.addView(actionButton("Dar permiso") { Updater.openInstallPermission(this) })
+                }
+                c.addView(actionButton("Intentar instalar") { installNow() })
+                c.addView(note("También queda una copia en la carpeta Descargas, por si prefieres abrirla con ES File Explorer."))
+            }
             st.startsWith("error") -> {
                 c.addView(note("No se pudo. Comprueba que la radio tiene internet."))
                 c.addView(actionButton("Reintentar") { checkUpdate() })
@@ -354,10 +369,24 @@ class SoundActivity : Activity() {
         val r = pending ?: return
         updateState = "bajando 0"
         build()
-        Updater.download(this, r) { pct ->
+        Updater.download(this, r, onError = { msg ->
+            updateState = "fallo " + msg
+            build()
+        }) { pct ->
             updateState = if (pct < 0) "error" else "bajando " + pct
             build()
         }
+    }
+
+    private fun installNow() {
+        val f = Updater.downloaded(this)
+        if (f == null) {
+            updateState = "fallo no hay ninguna descarga"
+        } else {
+            val err = Updater.install(this, f)
+            updateState = if (err == null) "bajando 100" else "fallo " + err
+        }
+        build()
     }
 
     override fun onDestroy() {
