@@ -5,7 +5,9 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
-import android.bluetooth.BluetoothDevice
+import android.hardware.usb.UsbConstants
+import android.hardware.usb.UsbDevice
+import android.hardware.usb.UsbManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -31,7 +33,7 @@ import kotlin.math.roundToInt
  * (por ejemplo con Android Auto delante) y se encarga de:
  *  1. Subir el volumen con la velocidad y bajarlo al frenar.
  *  2. Ajustar el brillo de la pantalla de día y de noche.
- *  3. Al encender el coche: reanudar la música y abrir Android Auto al conectar el móvil.
+ *  3. Al encender el coche: reanudar la música y abrir Android Auto al conectar el móvil por cable.
  */
 class DriveService : Service() {
 
@@ -41,7 +43,7 @@ class DriveService : Service() {
 
         /** La pantalla de inicio se apunta aquí mientras está visible. */
         var onPhoneConnected: (() -> Unit)? = null
-        /** Móvil conectado sin haber abierto aún Android Auto en este encendido. */
+        /** Móvil conectado por cable sin haber abierto aún Android Auto. */
         var pendingAuto = false
         var autoDoneThisWake = false
 
@@ -240,14 +242,27 @@ class DriveService : Service() {
                     lastBrightTarget = -1
                     applyBrightness()
                     scheduleAutoPlay()
+                    // Si el cable ya estaba puesto al encender el coche.
+                    handler.postDelayed({ if (phoneOnUsb()) phoneConnected() }, 2_000)
                 }
                 Intent.ACTION_SCREEN_OFF -> {
                     autoDoneThisWake = false
                     pendingAuto = false
                     restoreBaseVolume()
                 }
-                BluetoothDevice.ACTION_ACL_CONNECTED -> phoneConnected()
-                BluetoothDevice.ACTION_ACL_DISCONNECTED -> pendingAuto = false
+                UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
+                    val dev: UsbDevice? = if (Build.VERSION.SDK_INT >= 33)
+                        intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
+                    else @Suppress("DEPRECATION") intent.getParcelableExtra<UsbDevice>(UsbManager.EXTRA_DEVICE)
+                    if (dev != null && isPhone(dev)) phoneConnected()
+                }
+                UsbManager.ACTION_USB_DEVICE_DETACHED -> {
+                    // Al quitar el cable, la próxima conexión vuelve a abrir Android Auto.
+                    if (!phoneOnUsb()) {
+                        pendingAuto = false
+                        autoDoneThisWake = false
+                    }
+                }
             }
         }
     }
@@ -256,8 +271,8 @@ class DriveService : Service() {
         val f = IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_ON)
             addAction(Intent.ACTION_SCREEN_OFF)
-            addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
-            addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
+            addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
+            addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
         }
         try {
             if (Build.VERSION.SDK_INT >= 33) registerReceiver(receiver, f, Context.RECEIVER_EXPORTED)
@@ -281,9 +296,34 @@ class DriveService : Service() {
         }, 6_000)
     }
 
+    /**
+     * ¿Es un móvil lo que se ha enchufado? Descarta pendrives, discos, teclados,
+     * concentradores y tarjetas de sonido; el resto (MTP, modo accesorio de Android Auto...) cuenta como móvil.
+     */
+    private fun isPhone(d: UsbDevice): Boolean {
+        if (d.vendorId == 0x18D1 && d.productId in 0x2D00..0x2D05) return true // modo Android Auto
+        if (d.deviceClass == UsbConstants.USB_CLASS_HUB) return false
+        if (d.interfaceCount == 0) return false
+        for (i in 0 until d.interfaceCount) {
+            when (d.getInterface(i).interfaceClass) {
+                UsbConstants.USB_CLASS_MASS_STORAGE,
+                UsbConstants.USB_CLASS_HID,
+                UsbConstants.USB_CLASS_HUB,
+                UsbConstants.USB_CLASS_AUDIO -> return false
+            }
+        }
+        return true
+    }
+
+    private fun phoneOnUsb(): Boolean = try {
+        (getSystemService(Context.USB_SERVICE) as UsbManager).deviceList.values.any { isPhone(it) }
+    } catch (e: Exception) {
+        false
+    }
+
     private fun phoneConnected() {
         if (!prefs.getBoolean("auto_aa", false) || autoDoneThisWake) return
-        // Damos unos segundos para que el móvil termine de conectarse.
+        // Damos unos segundos para que el móvil termine de negociar la conexión.
         handler.postDelayed({
             if (autoDoneThisWake) return@postDelayed
             val cb = onPhoneConnected

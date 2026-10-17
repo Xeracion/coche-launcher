@@ -225,11 +225,9 @@ class SoundActivity : Activity() {
         })
         c.addView(View(this), LinearLayout.LayoutParams(1, dp(18)))
 
-        val btNeeded = Build.VERSION.SDK_INT >= 31 && !hasPerm(Manifest.permission.BLUETOOTH_CONNECT)
-        c.addView(toggleRow("Abrir Android Auto al conectar el móvil", "Una vez por encendido, cuando el móvil se conecta por Bluetooth.",
-            prefs.getBoolean("auto_aa", false) && !btNeeded) { v ->
+        c.addView(toggleRow("Abrir Android Auto al conectar el cable", "Cuando enchufas el móvil por USB. El Bluetooth sigue solo para llamadas y música.",
+            prefs.getBoolean("auto_aa", false)) { v ->
             prefs.edit().putBoolean("auto_aa", v).apply()
-            if (v && btNeeded) requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), 3)
             changed()
             build()
         })
