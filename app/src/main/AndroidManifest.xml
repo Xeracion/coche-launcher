@@ -11,6 +11,7 @@
     <uses-permission android:name="android.permission.WRITE_SETTINGS" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <queries>
         <package android:name="com.hzbhd.service.sourcemanager" />
@@ -59,6 +60,16 @@
             android:exported="false"
             android:excludeFromRecents="true"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen" />
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/paths" />
+        </provider>
 
         <service
             android:name=".DriveService"

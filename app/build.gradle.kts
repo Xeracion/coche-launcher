@@ -3,6 +3,10 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+dependencies {
+    implementation("androidx.core:core:1.13.1")
+}
+
 android {
     namespace = "es.fran.cochelauncher"
     compileSdk = 34

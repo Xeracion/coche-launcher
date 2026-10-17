@@ -254,6 +254,33 @@ class SoundActivity : Activity() {
     // ---------- Avanzado ----------
 
     private fun buildAdvanced(c: LinearLayout) {
+        c.addView(title("Actualizar la app"))
+        c.addView(TextView(this).apply {
+            text = "Versión instalada: " + try { packageManager.getPackageInfo(packageName, 0).versionName } catch (e: Exception) { "?" }
+            setTextColor(p.sub)
+            textSize = 15f
+            setPadding(0, dp(6), 0, 0)
+        })
+        val st = updateState
+        when {
+            st.startsWith("buscando") -> c.addView(note("Buscando…"))
+            st.startsWith("bajando") -> c.addView(note("Descargando… " + st.removePrefix("bajando ") + " %"))
+            st.startsWith("error") -> {
+                c.addView(note("No se pudo. Comprueba que la radio tiene internet."))
+                c.addView(actionButton("Reintentar") { checkUpdate() })
+            }
+            st.startsWith("aldia") -> {
+                c.addView(note("Ya tienes la última versión."))
+                c.addView(actionButton("Buscar de nuevo") { checkUpdate() })
+            }
+            st.startsWith("hay ") -> {
+                c.addView(note("Hay una versión nueva: " + st.removePrefix("hay ")))
+                c.addView(actionButton("Descargar e instalar") { startDownload() })
+            }
+            else -> c.addView(actionButton("Buscar actualización") { checkUpdate() })
+        }
+        c.addView(View(this), LinearLayout.LayoutParams(1, dp(28)))
+
         c.addView(title("Compartir apps de fábrica por wifi"))
         c.addView(note("Prepara un archivo con las apps de radio, teléfono y música Bluetooth del fabricante y lo ofrece en la wifi. Desde un ordenador conectado a la misma wifi, abre en el navegador la dirección que aparecerá aquí."))
         val addr = WifiShare.address()
@@ -269,6 +296,36 @@ class SoundActivity : Activity() {
         } else {
             c.addView(actionButton("Compartir por wifi") { exportApps(share = true) })
             if (WifiShare.address() == null) c.addView(note("La radio no está conectada a ninguna wifi. Conéctala al punto de acceso del móvil."))
+        }
+    }
+
+    // ---------- actualización ----------
+
+    private var updateState = ""
+    private var pending: Updater.Release? = null
+
+    private fun checkUpdate() {
+        updateState = "buscando"
+        build()
+        Updater.check { r ->
+            val mine = try { packageManager.getPackageInfo(packageName, 0).versionName } catch (e: Exception) { null }
+            updateState = when {
+                r == null -> "error"
+                mine != null && ("v" + mine.substringAfterLast('.')) == r.version -> "aldia"
+                else -> "hay " + r.version
+            }
+            pending = r
+            build()
+        }
+    }
+
+    private fun startDownload() {
+        val r = pending ?: return
+        updateState = "bajando 0"
+        build()
+        Updater.download(this, r) { pct ->
+            updateState = if (pct < 0) "error" else "bajando " + pct
+            build()
         }
     }
 
