@@ -254,12 +254,30 @@ class SoundActivity : Activity() {
     // ---------- Avanzado ----------
 
     private fun buildAdvanced(c: LinearLayout) {
-        c.addView(title("Exportar apps de fábrica"))
-        c.addView(note("Guarda en la carpeta Descargas un archivo apps_fabrica.zip con las apps de radio, teléfono y música Bluetooth del fabricante, y una lista de todo lo instalado. Sirve para estudiar cómo hablan con el sintonizador y el Bluetooth."))
-        c.addView(actionButton("Exportar") { exportApps() })
+        c.addView(title("Compartir apps de fábrica por wifi"))
+        c.addView(note("Prepara un archivo con las apps de radio, teléfono y música Bluetooth del fabricante y lo ofrece en la wifi. Desde un ordenador conectado a la misma wifi, abre en el navegador la dirección que aparecerá aquí."))
+        val addr = WifiShare.address()
+        if (WifiShare.running && addr != null) {
+            c.addView(TextView(this).apply {
+                text = addr
+                setTextColor(p.accent)
+                textSize = 30f
+                setPadding(0, dp(16), 0, dp(4))
+            })
+            c.addView(note("Deja esta pantalla abierta mientras se descarga."))
+            c.addView(actionButton("Dejar de compartir") { WifiShare.stop(); build() })
+        } else {
+            c.addView(actionButton("Compartir por wifi") { exportApps(share = true) })
+            if (WifiShare.address() == null) c.addView(note("La radio no está conectada a ninguna wifi. Conéctala al punto de acceso del móvil."))
+        }
     }
 
-    private fun exportApps() {
+    override fun onDestroy() {
+        super.onDestroy()
+        WifiShare.stop()
+    }
+
+    private fun exportApps(share: Boolean = false) {
         Toast.makeText(this, "Exportando… puede tardar un poco", Toast.LENGTH_SHORT).show()
         Thread {
             val msg = try {
@@ -274,14 +292,9 @@ class SoundActivity : Activity() {
                 val all = pm.getInstalledApplications(0)
                 for (ai in all) if (prefixes.any { ai.packageName.startsWith("$it.") || ai.packageName == it }) targets += ai.packageName
 
-                val values = android.content.ContentValues().apply {
-                    put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, "apps_fabrica.zip")
-                    put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "application/zip")
-                }
-                val uri = contentResolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-                    ?: throw IllegalStateException("no se pudo crear el archivo")
+                val out = java.io.File(cacheDir, "apps_fabrica.zip")
                 var n = 0
-                java.util.zip.ZipOutputStream(contentResolver.openOutputStream(uri)).use { zip ->
+                java.util.zip.ZipOutputStream(java.io.FileOutputStream(out)).use { zip ->
                     for (pkg in targets) {
                         try {
                             val ai = pm.getApplicationInfo(pkg, 0)
@@ -306,11 +319,17 @@ class SoundActivity : Activity() {
                     zip.write(sb.toString().toByteArray())
                     zip.closeEntry()
                 }
-                "Guardado en Descargas: apps_fabrica.zip ($n apps)"
+                if (share) {
+                    WifiShare.start(out)
+                    "Listo: $n apps preparadas"
+                } else "Preparadas $n apps"
             } catch (e: Exception) {
                 "No se pudo exportar: " + e.message
             }
-            runOnUiThread { Toast.makeText(this, msg, Toast.LENGTH_LONG).show() }
+            runOnUiThread {
+                Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+                build()
+            }
         }.start()
     }
 
