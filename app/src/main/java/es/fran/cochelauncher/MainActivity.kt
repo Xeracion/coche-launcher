@@ -696,6 +696,12 @@ class MainActivity : Activity() {
 
     private fun mediaCmd(keyCode: Int) {
         val c = controller
+        val playing = c?.playbackState?.state == PlaybackState.STATE_PLAYING
+        // Al dar al play con música del móvil, conmutamos antes el canal de audio a Bluetooth.
+        if (keyCode == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE && !playing && BtSwitch.isBtSource(this, c?.packageName)) {
+            BtSwitch.warmAndPlay(this, true)
+            return
+        }
         if (c != null) {
             val t = c.transportControls
             when (keyCode) {

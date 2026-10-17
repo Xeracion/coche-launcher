@@ -29,7 +29,7 @@ class SoundActivity : Activity() {
     private lateinit var root: LinearLayout
     private lateinit var prefs: android.content.SharedPreferences
     private var tab = 0
-    private val tabs = listOf("Sonido", "Conducción", "Pantalla", "Arranque")
+    private val tabs = listOf("Sonido", "Conducción", "Pantalla", "Arranque", "Avanzado")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -109,7 +109,8 @@ class SoundActivity : Activity() {
             0 -> buildSound(content)
             1 -> buildDriving(content)
             2 -> buildScreen(content)
-            else -> buildStartup(content)
+            3 -> buildStartup(content)
+            else -> buildAdvanced(content)
         }
     }
 
@@ -225,8 +226,8 @@ class SoundActivity : Activity() {
     // ---------- Arranque ----------
 
     private fun buildStartup(c: LinearLayout) {
-        c.addView(toggleRow("Reanudar la música al encender", "Si al arrancar no suena nada, da al play a los pocos segundos.",
-            prefs.getBoolean("auto_play", false)) { v ->
+        c.addView(toggleRow("Música al encender", "Conecta el sonido del móvil por Bluetooth y sigue con la última canción.",
+            prefs.getBoolean("auto_play", true)) { v ->
             prefs.edit().putBoolean("auto_play", v).apply()
             changed()
         })
@@ -248,6 +249,69 @@ class SoundActivity : Activity() {
                 }
             })
         }
+    }
+
+    // ---------- Avanzado ----------
+
+    private fun buildAdvanced(c: LinearLayout) {
+        c.addView(title("Exportar apps de fábrica"))
+        c.addView(note("Guarda en la carpeta Descargas un archivo apps_fabrica.zip con las apps de radio, teléfono y música Bluetooth del fabricante, y una lista de todo lo instalado. Sirve para estudiar cómo hablan con el sintonizador y el Bluetooth."))
+        c.addView(actionButton("Exportar") { exportApps() })
+    }
+
+    private fun exportApps() {
+        Toast.makeText(this, "Exportando… puede tardar un poco", Toast.LENGTH_SHORT).show()
+        Thread {
+            val msg = try {
+                val pm = packageManager
+                val targets = linkedSetOf<String>()
+                for (s in listOf(Slot.RADIO, Slot.PHONE, Slot.BTMUSIC)) {
+                    Apps.resolve(this, s)?.component?.packageName?.let { targets += it }
+                }
+                // Todo lo que comparta prefijo de fabricante con esas apps (servicios del canbus, MCU...).
+                val prefixes = targets.map { it.split('.').take(2).joinToString(".") }
+                    .filter { it != "com.android" && it != "com.google" && it != "android" }.toSet()
+                val all = pm.getInstalledApplications(0)
+                for (ai in all) if (prefixes.any { ai.packageName.startsWith("$it.") || ai.packageName == it }) targets += ai.packageName
+
+                val values = android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, "apps_fabrica.zip")
+                    put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "application/zip")
+                }
+                val uri = contentResolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                    ?: throw IllegalStateException("no se pudo crear el archivo")
+                var n = 0
+                java.util.zip.ZipOutputStream(contentResolver.openOutputStream(uri)).use { zip ->
+                    for (pkg in targets) {
+                        try {
+                            val ai = pm.getApplicationInfo(pkg, 0)
+                            val files = listOf(ai.sourceDir) + (ai.splitSourceDirs?.toList() ?: emptyList())
+                            files.forEachIndexed { i, f ->
+                                zip.putNextEntry(java.util.zip.ZipEntry(if (i == 0) "$pkg.apk" else "${pkg}_split$i.apk"))
+                                java.io.File(f).inputStream().use { it.copyTo(zip) }
+                                zip.closeEntry()
+                            }
+                            n++
+                        } catch (e: Exception) {
+                        }
+                    }
+                    zip.putNextEntry(java.util.zip.ZipEntry("paquetes.txt"))
+                    val sb = StringBuilder()
+                    sb.append("Exportadas: ").append(targets.joinToString(", ")).append("\n\n")
+                    for (ai in all.sortedBy { it.packageName }) {
+                        val sys = (ai.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0
+                        sb.append(ai.packageName).append(" | ").append(pm.getApplicationLabel(ai))
+                            .append(if (sys) " | sistema" else "").append(" | ").append(ai.sourceDir).append('\n')
+                    }
+                    zip.write(sb.toString().toByteArray())
+                    zip.closeEntry()
+                }
+                "Guardado en Descargas: apps_fabrica.zip ($n apps)"
+            } catch (e: Exception) {
+                "No se pudo exportar: " + e.message
+            }
+            runOnUiThread { Toast.makeText(this, msg, Toast.LENGTH_LONG).show() }
+        }.start()
     }
 
     private fun hasPerm(perm: String) = checkSelfPermission(perm) == PackageManager.PERMISSION_GRANTED

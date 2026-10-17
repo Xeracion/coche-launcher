@@ -283,17 +283,16 @@ class DriveService : Service() {
     }
 
     /** Unos segundos después de encender, si no suena nada, da al play. */
+    /**
+     * Al encender: conmuta el canal de audio a Bluetooth y sigue con la última canción.
+     * No lo hace si el móvil va por cable con Android Auto, que gestiona su propio sonido.
+     */
     private fun scheduleAutoPlay() {
-        if (!prefs.getBoolean("auto_play", false)) return
+        if (!prefs.getBoolean("auto_play", true)) return
         handler.postDelayed({
-            if (!audio.isMusicActive) {
-                try {
-                    audio.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PLAY))
-                    audio.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PLAY))
-                } catch (e: Exception) {
-                }
-            }
-        }, 6_000)
+            if (prefs.getBoolean("auto_aa", false) && phoneOnUsb()) return@postDelayed
+            BtSwitch.warmAndPlay(this, play = !audio.isMusicActive)
+        }, 8_000)
     }
 
     /**
