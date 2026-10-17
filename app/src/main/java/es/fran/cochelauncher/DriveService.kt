@@ -1,8 +1,14 @@
 package es.fran.cochelauncher
 
 import android.Manifest
+import android.app.Activity
+import android.app.Application
 import android.app.Notification
+import android.app.Activity
+import android.app.Application
 import android.app.NotificationChannel
+import android.app.Activity
+import android.app.Application
 import android.app.NotificationManager
 import android.app.Service
 import android.hardware.usb.UsbConstants
@@ -65,6 +71,19 @@ class DriveService : Service() {
     private var listening = false
     private var receiversOn = false
 
+    /** ¿Hay alguna pantalla nuestra delante? Lo mantienen los avisos de ciclo de vida. */
+    @Volatile private var ownUiVisible = false
+
+    private val lifecycle = object : Application.ActivityLifecycleCallbacks {
+        override fun onActivityResumed(a: Activity) { ownUiVisible = true }
+        override fun onActivityPaused(a: Activity) { ownUiVisible = false }
+        override fun onActivityCreated(a: Activity, b: android.os.Bundle?) {}
+        override fun onActivityStarted(a: Activity) {}
+        override fun onActivityStopped(a: Activity) {}
+        override fun onActivitySaveInstanceState(a: Activity, b: android.os.Bundle) {}
+        override fun onActivityDestroyed(a: Activity) {}
+    }
+
     // ---------- ciclo de vida ----------
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -77,8 +96,10 @@ class DriveService : Service() {
         registerReceivers()
         Sound.init(this)
         BtSwitch.connect(this)
+        try { (applicationContext as Application).registerActivityLifecycleCallbacks(lifecycle) } catch (e: Exception) { }
         handler.post(brightnessLoop)
         scheduleAutoPlay()
+        scheduleHomeGuard()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -243,6 +264,7 @@ class DriveService : Service() {
                     lastBrightTarget = -1
                     applyBrightness()
                     scheduleAutoPlay()
+                    scheduleHomeGuard()
                     // Si el cable ya estaba puesto al encender el coche.
                     handler.postDelayed({ if (phoneOnUsb()) phoneConnected() }, 2_000)
                 }
@@ -250,6 +272,7 @@ class DriveService : Service() {
                     autoDoneThisWake = false
                     pendingAuto = false
                     restoreBaseVolume()
+                    handler.removeCallbacksAndMessages(guardToken)
                 }
                 UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
                     val dev: UsbDevice? = if (Build.VERSION.SDK_INT >= 33)
@@ -294,6 +317,34 @@ class DriveService : Service() {
             if (prefs.getBoolean("auto_aa", false) && phoneOnUsb()) return@postDelayed
             BtSwitch.warmAndPlay(this, play = !audio.isMusicActive)
         }, 4_000)
+    }
+
+    /**
+     * Vigilante del arranque: la radio restaura al encender su última fuente y planta
+     * su pantalla encima. Durante los primeros segundos, si nuestra pantalla no está
+     * delante, la traemos de vuelta. La música sigue sonando: solo cambia lo que se ve.
+     */
+    private val guardToken = Any()
+
+    private fun scheduleHomeGuard() {
+        if (!prefs.getBoolean("guard_home", true)) return
+        handler.removeCallbacksAndMessages(guardToken)
+        for (t in longArrayOf(4_000, 7_000, 10_500, 14_000, 18_000)) {
+            handler.postAtTime({ guardCheck() }, guardToken, android.os.SystemClock.uptimeMillis() + t)
+        }
+    }
+
+    private fun guardCheck() {
+        if (ownUiVisible) return
+        // Si Android Auto acaba de abrirse por el cable, le dejamos la pantalla.
+        if (autoDoneThisWake) return
+        try {
+            startActivity(
+                Intent(this, MainActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
+            )
+        } catch (e: Exception) {
+        }
     }
 
     /**

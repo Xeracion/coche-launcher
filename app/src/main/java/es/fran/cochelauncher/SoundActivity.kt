@@ -233,6 +233,13 @@ class SoundActivity : Activity() {
         })
         c.addView(View(this), LinearLayout.LayoutParams(1, dp(18)))
 
+        c.addView(toggleRow("Mantener mi pantalla al arrancar", "Si la radio planta su reproductor al encender, esta pantalla vuelve al frente durante los primeros segundos.",
+            prefs.getBoolean("guard_home", true)) { v ->
+            prefs.edit().putBoolean("guard_home", v).apply()
+            changed()
+        })
+        c.addView(View(this), LinearLayout.LayoutParams(1, dp(18)))
+
         c.addView(toggleRow("Abrir Android Auto al conectar el cable", "Cuando enchufas el móvil por USB. El Bluetooth sigue solo para llamadas y música.",
             prefs.getBoolean("auto_aa", false)) { v ->
             prefs.edit().putBoolean("auto_aa", v).apply()
