@@ -70,6 +70,10 @@ class MainActivity : Activity() {
 
     private var lastFix: Location? = null
     private var lastFixAt = 0L
+    private var speedBox: LinearLayout? = null
+    private var moving = false
+    private var slowSince = 0L
+    private var speedLayoutAnim: ValueAnimator? = null
     private var ticks = 0
 
     private val ticker = object : Runnable {
@@ -168,11 +172,17 @@ class MainActivity : Activity() {
         val mid = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         main.addView(mid, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(6) })
 
+        // La velocidad solo se ve en marcha. Parado, la música ocupa todo el ancho.
         val speedBox = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
+            clipChildren = false
         }
-        mid.addView(speedBox, LinearLayout.LayoutParams(0, -1, 1f).apply { rightMargin = dp(18) })
+        this.speedBox = speedBox
+        mid.addView(speedBox, LinearLayout.LayoutParams(0, -1, if (moving) 1f else 0f).apply {
+            rightMargin = if (moving) dp(18) else 0
+        })
+        if (!moving) speedBox.visibility = View.GONE
         speedView = TextView(this).apply {
             text = if (shownSpeed >= 0) shownSpeed.toString() else "--"
             setTextColor(c.text)
@@ -203,7 +213,7 @@ class MainActivity : Activity() {
         main.addView(dock, LinearLayout.LayoutParams(-1, dp(84)).apply { topMargin = dp(16) })
 
         if (animate) {
-            speedBox.enter(0, 14)
+            if (moving) speedBox.enter(0, 14)
             media.enter(80, 20)
         }
         tick()
@@ -379,13 +389,8 @@ class MainActivity : Activity() {
         val d = SimpleDateFormat("EEEE, d 'de' MMMM", Locale("es", "ES")).format(now)
         dateView?.text = d.replaceFirstChar { it.uppercase() }
 
-        // Si el GPS lleva unos segundos sin dar posición, no mostramos una velocidad vieja.
-        if (SystemClock.elapsedRealtime() - lastFixAt > 5_000) {
-            speedAnim?.cancel()
-            shownSpeed = -1
-            speedView?.text = "--"
-            speedHint?.text = if (hasLocationPermission()) "Buscando GPS" else "Sin permiso de ubicación"
-        }
+        // Sin GPS durante unos segundos: tratamos el coche como parado.
+        if (moving && SystemClock.elapsedRealtime() - lastFixAt > 6_000) setMoving(false)
 
         ticks++
         if (ticks % 15 == 0) {
@@ -460,7 +465,56 @@ class MainActivity : Activity() {
         var kmh = (mps * 3.6).roundToInt()
         if (kmh < 3) kmh = 0 // evita que baile parado
         speedHint?.text = ""
+        val now = SystemClock.elapsedRealtime()
+
+        // Histéresis: aparece al pasar de 6 km/h; se oculta tras 8 s por debajo de 3 km/h.
+        // Así no parpadea en un semáforo o en un atasco a paso de peatón.
+        if (kmh >= 6) {
+            slowSince = 0L
+            if (!moving) setMoving(true)
+        } else if (kmh < 3 && moving) {
+            if (slowSince == 0L) slowSince = now
+            if (now - slowSince > 8_000) setMoving(false)
+        }
         animateSpeed(kmh)
+    }
+
+    /** Muestra u oculta el bloque de velocidad con una transición suave del ancho. */
+    private fun setMoving(on: Boolean) {
+        if (on == moving) return
+        moving = on
+        slowSince = 0L
+        val box = speedBox ?: return
+        val lp = box.layoutParams as LinearLayout.LayoutParams
+        speedLayoutAnim?.cancel()
+        if (on) {
+            box.visibility = View.VISIBLE
+            box.alpha = 0f
+            box.translationX = -dp(30).toFloat()
+        }
+        val from = lp.weight
+        val to = if (on) 1f else 0f
+        speedLayoutAnim = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 650
+            interpolator = DecelerateInterpolator(1.6f)
+            addUpdateListener {
+                val t = it.animatedValue as Float
+                lp.weight = from + (to - from) * t
+                lp.rightMargin = (dp(18) * lp.weight).toInt()
+                box.layoutParams = lp
+                box.alpha = if (on) t else 1f - t * 1.6f
+                box.translationX = if (on) -dp(30) * (1f - t) else -dp(30) * t
+            }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    if (!moving) {
+                        box.visibility = View.GONE
+                        shownSpeed = -1
+                    }
+                }
+            })
+            start()
+        }
     }
 
     /** La cifra cuenta hasta el valor nuevo en lugar de saltar. */
