@@ -26,7 +26,14 @@ object Sound {
         Preset("Agudos", listOf(0, 0, 1, 4, 6), 0),
     )
 
+    /** El ecualizador va apagado por defecto: en algunas radios silencia el audio Bluetooth. */
+    fun isOn(ctx: Context) = prefs(ctx).getBoolean("eq_on", false)
+
     fun init(ctx: Context) {
+        if (!isOn(ctx)) {
+            release()
+            return
+        }
         if (eq != null) return
         try {
             eq = Equalizer(1000, 0).apply { enabled = true }
@@ -41,6 +48,18 @@ object Sound {
             bass = null
         }
         restore(ctx)
+    }
+
+    fun setOn(ctx: Context, on: Boolean) {
+        prefs(ctx).edit().putBoolean("eq_on", on).apply()
+        init(ctx)
+    }
+
+    private fun release() {
+        try { eq?.enabled = false; eq?.release() } catch (e: Throwable) { }
+        try { bass?.enabled = false; bass?.release() } catch (e: Throwable) { }
+        eq = null
+        bass = null
     }
 
     fun bands(): Int = try { eq?.numberOfBands?.toInt() ?: 0 } catch (e: Throwable) { 0 }

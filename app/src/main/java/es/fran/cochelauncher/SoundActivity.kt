@@ -116,6 +116,13 @@ class SoundActivity : Activity() {
     // ---------- Sonido ----------
 
     private fun buildSound(c: LinearLayout) {
+        val on = Sound.isOn(this)
+        c.addView(toggleRow("Ecualizador", "Si al activarlo deja de sonar la música Bluetooth, apágalo: esta radio no lo admite.", on) { v ->
+            Sound.setOn(this, v)
+            build()
+        })
+        if (!on) return
+        c.addView(View(this), LinearLayout.LayoutParams(1, dp(16)))
         if (!Sound.available) {
             c.addView(note("Esta radio no permite el ecualizador de Android. Habrá que buscar el ajuste del fabricante."))
             return
