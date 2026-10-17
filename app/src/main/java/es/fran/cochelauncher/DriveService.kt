@@ -49,6 +49,9 @@ class DriveService : Service() {
         var pendingAuto = false
         var autoDoneThisWake = false
 
+        /** El usuario ha abierto una app desde nuestro inicio: el vigilante le deja en paz. */
+        @Volatile var userNavigatedAway = false
+
         fun start(ctx: Context, refresh: Boolean = false) {
             val i = Intent(ctx, DriveService::class.java)
             if (refresh) i.action = ACTION_REFRESH
@@ -321,19 +324,30 @@ class DriveService : Service() {
      * delante, la traemos de vuelta. La música sigue sonando: solo cambia lo que se ve.
      */
     private val guardToken = Any()
+    private var guardYanks = 0
 
     private fun scheduleHomeGuard() {
         if (!prefs.getBoolean("guard_home", true)) return
+        userNavigatedAway = false
+        guardYanks = 0
         handler.removeCallbacksAndMessages(guardToken)
-        for (t in longArrayOf(4_000, 7_000, 10_500, 14_000, 18_000)) {
+        // Comprobamos cada 3 segundos durante el primer minuto: la radio puede plantar
+        // su pantalla en cuanto el móvil termina de conectarse, que a veces tarda.
+        var t = 4_000L
+        while (t <= 60_000L) {
             handler.postAtTime({ guardCheck() }, guardToken, android.os.SystemClock.uptimeMillis() + t)
+            t += 3_000L
         }
     }
 
     private fun guardCheck() {
-        if (ownUiVisible) return
-        // Si Android Auto acaba de abrirse por el cable, le dejamos la pantalla.
-        if (autoDoneThisWake) return
+        if (ownUiVisible || guardYanks >= 3) return
+        // Si has abierto algo tú, o Android Auto entró por el cable, no nos metemos.
+        if (userNavigatedAway || autoDoneThisWake) {
+            handler.removeCallbacksAndMessages(guardToken)
+            return
+        }
+        guardYanks++
         try {
             startActivity(
                 Intent(this, MainActivity::class.java)

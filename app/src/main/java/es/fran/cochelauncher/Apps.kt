@@ -83,6 +83,7 @@ object Apps {
             return
         }
         try {
+            DriveService.userNavigatedAway = true
             ctx.startActivity(
                 Intent(Intent.ACTION_MAIN)
                     .addCategory(Intent.CATEGORY_LAUNCHER)
