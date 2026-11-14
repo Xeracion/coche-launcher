@@ -4,12 +4,12 @@ Pantalla de inicio de estilo minimalista para la radio Android del Dacia (Androi
 
 ## Qué hace
 
-1. De fondo, la imagen de fondo de pantalla de la radio. Los botones y las tarjetas toman su color. Se puede volver a la textura propia en Ajustes > Pantalla.
+1. Fondo con textura propia y colores en azul mar.
 2. Reloj grande con fecha y tiempo a la izquierda. En marcha, la velocidad ocupa su lugar.
 3. Tarjeta de la canción en curso con anterior, pausa y siguiente. Deslizando sobre ella se cambia de canción.
 4. Modo oscuro automático desde la puesta de sol hasta el amanecer, calculado cada día con el GPS de la radio.
-5. Dock inferior con Teléfono, Radio, Música BT, Android Auto, el asistente del móvil y las herramientas.
-6. Gestos configurables en Ajustes > Gestos: deslizar arriba (todas las apps), deslizar abajo (asistente), tocar dos veces (apagar pantalla) y mantener pulsado (cambiar fondo).
+5. Dock inferior al estilo de un móvil Android: iconos redondos de color para Teléfono, Radio, Música BT, Android Auto y el asistente del móvil, y herramientas en círculos neutros.
+6. Gestos configurables en Ajustes > Gestos: deslizar arriba (todas las apps), deslizar abajo (asistente), tocar dos veces (apagar pantalla) y mantener pulsado (ajustes).
 
 Mantener pulsado cualquier acceso permite cambiar la app que abre.
 

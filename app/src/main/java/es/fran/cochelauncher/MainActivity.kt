@@ -230,14 +230,7 @@ class MainActivity : Activity() {
             "phone" -> Apps.launch(this, Apps.resolve(this, Slot.PHONE))
             "theme" -> cycleTheme()
             "settings" -> startActivity(Intent(this, SoundActivity::class.java))
-            "wallpaper" -> Look.pickWallpaper(this)
         }
-    }
-
-    @Deprecated("Deprecated in Java")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == Look.REQ_WALL && resultCode == RESULT_OK) Look.setWallpaper(this, data?.data) { build() }
     }
 
     @Deprecated("Deprecated in Java")
@@ -382,7 +375,7 @@ class MainActivity : Activity() {
 
         // Dock flotante, solo iconos.
         val dock = buildDock(c, animate)
-        main.addView(dock, LinearLayout.LayoutParams(-1, dp(84)).apply { topMargin = dp(8) })
+        main.addView(dock, LinearLayout.LayoutParams(-1, dp(84)).apply { topMargin = dp(6) })
 
         if (animate) {
             (if (moving) speedBox else clockBox).enter(0, 14)
@@ -481,26 +474,26 @@ class MainActivity : Activity() {
         }
 
     private fun buildDock(c: Palette, animate: Boolean): View {
+        // Estilo dock de móvil: iconos redondos flotando, sin barra de fondo.
         val dock = LinearLayout(this).apply {
-            gravity = Gravity.CENTER_VERTICAL
-            background = cardBg(c, 42)
-            setPadding(dp(14), dp(8), dp(14), dp(8))
+            gravity = Gravity.CENTER
+            setPadding(dp(8), 0, dp(8), 0)
         }
         val items = mutableListOf<View>()
         val mainApps = listOf(
-            Slot.PHONE to R.drawable.ic_phone,
-            Slot.RADIO to R.drawable.ic_radio,
-            Slot.BTMUSIC to R.drawable.ic_music,
-            Slot.AUTO to R.drawable.ic_car,
+            Triple(Slot.PHONE, R.drawable.ic_phone, 0xFF2EA868.toInt()),
+            Triple(Slot.RADIO, R.drawable.ic_radio, 0xFFEF8A2B.toInt()),
+            Triple(Slot.BTMUSIC, R.drawable.ic_music, 0xFF8E5CE0.toInt()),
+            Triple(Slot.AUTO, R.drawable.ic_car, 0xFF3D7FEA.toInt()),
         )
-        for ((slot, icon) in mainApps) {
+        for ((slot, icon, color) in mainApps) {
             val app = Apps.resolve(this, slot)
-            items += dockItem(c, icon, slot.title, c.accent, accent = true,
+            items += dockItem(c, icon, slot.title, color,
                 onClick = { Apps.launch(this, app) },
                 onLong = { pickApp(slot) })
         }
         // Asistente del móvil (Claude) por el manos libres.
-        items += dockItem(c, R.drawable.ic_assistant, "Asistente", c.accent, accent = true,
+        items += dockItem(c, R.drawable.ic_assistant, "Asistente", 0xFFD9653B.toInt(),
             onClick = { assistant() },
             onLong = { pickAssistant() })
         val modeName = when (Theme.mode(this)) {
@@ -509,13 +502,13 @@ class MainActivity : Activity() {
             else -> "Modo automático"
         }
         val tools = listOf(
-            dockItem(c, R.drawable.ic_eq, "Ajustes", c.text, onClick = { startActivity(Intent(this, SoundActivity::class.java)) }),
-            dockItem(c, R.drawable.ic_theme, modeName, c.text, onClick = { cycleTheme() }),
-            dockItem(c, R.drawable.ic_power, "Apagar pantalla", c.text, onClick = { startActivity(Intent(this, BlackoutActivity::class.java)) }),
-            dockItem(c, R.drawable.ic_apps, "Todas las apps", c.text, onClick = { openApps() }),
+            dockItem(c, R.drawable.ic_eq, "Ajustes", null, onClick = { startActivity(Intent(this, SoundActivity::class.java)) }),
+            dockItem(c, R.drawable.ic_theme, modeName, null, onClick = { cycleTheme() }),
+            dockItem(c, R.drawable.ic_power, "Apagar pantalla", null, onClick = { startActivity(Intent(this, BlackoutActivity::class.java)) }),
+            dockItem(c, R.drawable.ic_apps, "Todas las apps", null, onClick = { openApps() }),
         )
         for (v in items) dock.addView(v, LinearLayout.LayoutParams(0, -1, 1f))
-        dock.addView(View(this).apply { setBackgroundColor(c.edge) }, LinearLayout.LayoutParams(dp(1), dp(36)).apply { leftMargin = dp(10); rightMargin = dp(10) })
+        dock.addView(View(this), LinearLayout.LayoutParams(dp(28), 1))
         for (v in tools) dock.addView(v, LinearLayout.LayoutParams(0, -1, 1f))
         if (animate) {
             (items + tools).forEachIndexed { i, v -> v.enter(140L + i * 45L) }
@@ -523,24 +516,34 @@ class MainActivity : Activity() {
         return dock
     }
 
-    private fun dockItem(c: Palette, icon: Int, description: String, iconColor: Int, accent: Boolean = false,
+    /**
+     * Icono redondo, como los de un móvil Android. Con color: círculo de color y glifo blanco.
+     * Sin color (herramientas): círculo translúcido y glifo del color del texto.
+     */
+    private fun dockItem(c: Palette, icon: Int, description: String, color: Int?,
                          onClick: () -> Unit, onLong: (() -> Unit)? = null): View {
-        // Estilo baldosa: cada icono dentro de una tesela redondeada.
-        // Principales en azul con glifo blanco; herramientas en tesela neutra.
         val box = FrameLayout(this)
-        val tile = FrameLayout(this).apply {
+        val size = if (color != null) dp(66) else dp(56)
+        val circle = FrameLayout(this).apply {
             contentDescription = description
-            background = cardBg(c, 18, if (accent) c.accent else c.tile)
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(color ?: c.chip)
+            }
+            if (color != null) {
+                elevation = dp(5).toFloat()
+                outlineProvider = ViewOutlineProvider.BACKGROUND
+            }
             isClickable = true
             setOnClickListener { onClick() }
             if (onLong != null) setOnLongClickListener { onLong(); true }
-            springy(0.84f)
+            springy(0.86f)
         }
-        box.addView(tile, FrameLayout.LayoutParams(dp(58), dp(58), Gravity.CENTER))
-        tile.addView(ImageView(this).apply {
+        box.addView(circle, FrameLayout.LayoutParams(size, size, Gravity.CENTER))
+        circle.addView(ImageView(this).apply {
             setImageResource(icon)
-            setColorFilter(if (accent) Color.WHITE else iconColor, PorterDuff.Mode.SRC_IN)
-        }, FrameLayout.LayoutParams(dp(30), dp(30), Gravity.CENTER))
+            setColorFilter(if (color != null) Color.WHITE else c.text, PorterDuff.Mode.SRC_IN)
+        }, FrameLayout.LayoutParams(if (color != null) dp(32) else dp(26), if (color != null) dp(32) else dp(26), Gravity.CENTER))
         return box
     }
 

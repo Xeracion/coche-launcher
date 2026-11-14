@@ -60,12 +60,6 @@ class SoundActivity : Activity() {
         if (hasFocus) hideSystemBars()
     }
 
-    @Deprecated("Deprecated in Java")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == Look.REQ_WALL && resultCode == RESULT_OK) Look.setWallpaper(this, data?.data) { build() }
-    }
-
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         build()
@@ -212,22 +206,6 @@ class SoundActivity : Activity() {
     }
 
     private fun buildScreen(c: LinearLayout) {
-        c.addView(title("Fondo"))
-        val bg = listOf("wall", "texture")
-        c.addView(segment(listOf("Imagen de fondo", "Textura propia"), bg.indexOf(Look.bgMode(this)).coerceAtLeast(0)) { i ->
-            Look.setBgMode(this, bg[i])
-            build()
-        }, LinearLayout.LayoutParams(-1, dp(52)).apply { topMargin = dp(10); bottomMargin = dp(12) })
-        if (Look.bgMode(this) == "wall") {
-            c.addView(actionButton("Cambiar la imagen de fondo") { Look.pickWallpaper(this) })
-            c.addView(View(this), LinearLayout.LayoutParams(1, dp(10)))
-        }
-        c.addView(toggleRow("Colores del fondo", "Los botones y las tarjetas toman el color de la imagen de fondo.", Look.wallColors(this)) { v ->
-            Look.setWallColors(this, v)
-            build()
-        })
-        c.addView(View(this), LinearLayout.LayoutParams(1, dp(22)))
-
         c.addView(title("Tema"))
         val modes = listOf("auto", "dark", "light")
         c.addView(segment(listOf("Automático", "Oscuro", "Claro"), modes.indexOf(Theme.mode(this)).coerceAtLeast(0)) { i ->

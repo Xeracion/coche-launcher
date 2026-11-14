@@ -12,7 +12,7 @@ object Gestures {
         G("g_up", "Deslizar hacia arriba", "apps"),
         G("g_down", "Deslizar hacia abajo", "assistant"),
         G("g_double", "Tocar dos veces en una zona vacía", "blackout"),
-        G("g_long", "Mantener pulsado en una zona vacía", "wallpaper"),
+        G("g_long", "Mantener pulsado en una zona vacía", "settings"),
     )
 
     /** Acciones posibles, en el orden en que salen en la lista. */
@@ -25,11 +25,12 @@ object Gestures {
         "phone" to "Abrir el teléfono",
         "theme" to "Cambiar modo día/noche",
         "settings" to "Abrir los ajustes",
-        "wallpaper" to "Cambiar la imagen de fondo",
     )
 
-    fun action(ctx: Context, g: G): String =
-        ctx.getSharedPreferences(Apps.PREFS, Context.MODE_PRIVATE).getString(g.key, g.default) ?: g.default
+    fun action(ctx: Context, g: G): String {
+        val a = ctx.getSharedPreferences(Apps.PREFS, Context.MODE_PRIVATE).getString(g.key, g.default) ?: g.default
+        return if (a in actions) a else g.default
+    }
 
     fun set(ctx: Context, g: G, action: String) {
         ctx.getSharedPreferences(Apps.PREFS, Context.MODE_PRIVATE).edit().putString(g.key, action).apply()
