@@ -480,20 +480,22 @@ class MainActivity : Activity() {
             setPadding(dp(8), 0, dp(8), 0)
         }
         val items = mutableListOf<View>()
+        // Tono de color de cada icono (0-360). Los colores salen apagados, al estilo
+        // de los iconos temáticos de Android: fondo suave y símbolo del mismo tono.
         val mainApps = listOf(
-            Triple(Slot.PHONE, R.drawable.ic_phone, 0xFF2EA868.toInt()),
-            Triple(Slot.RADIO, R.drawable.ic_radio, 0xFFEF8A2B.toInt()),
-            Triple(Slot.BTMUSIC, R.drawable.ic_music, 0xFF8E5CE0.toInt()),
-            Triple(Slot.AUTO, R.drawable.ic_car, 0xFF3D7FEA.toInt()),
+            Triple(Slot.PHONE, R.drawable.ms_call, 150f),
+            Triple(Slot.RADIO, R.drawable.ms_radio, 32f),
+            Triple(Slot.BTMUSIC, R.drawable.ms_bluetooth, 262f),
+            Triple(Slot.AUTO, R.drawable.ms_car, 208f),
         )
-        for ((slot, icon, color) in mainApps) {
+        for ((slot, icon, hue) in mainApps) {
             val app = Apps.resolve(this, slot)
-            items += dockItem(c, icon, slot.title, color,
+            items += dockItem(c, icon, slot.title, hue,
                 onClick = { Apps.launch(this, app) },
                 onLong = { pickApp(slot) })
         }
         // Asistente del móvil (Claude) por el manos libres.
-        items += dockItem(c, R.drawable.ic_assistant, "Asistente", 0xFFD9653B.toInt(),
+        items += dockItem(c, R.drawable.ms_mic, "Asistente", 16f,
             onClick = { assistant() },
             onLong = { pickAssistant() })
         val modeName = when (Theme.mode(this)) {
@@ -502,10 +504,10 @@ class MainActivity : Activity() {
             else -> "Modo automático"
         }
         val tools = listOf(
-            dockItem(c, R.drawable.ic_eq, "Ajustes", null, onClick = { startActivity(Intent(this, SoundActivity::class.java)) }),
-            dockItem(c, R.drawable.ic_theme, modeName, null, onClick = { cycleTheme() }),
-            dockItem(c, R.drawable.ic_power, "Apagar pantalla", null, onClick = { startActivity(Intent(this, BlackoutActivity::class.java)) }),
-            dockItem(c, R.drawable.ic_apps, "Todas las apps", null, onClick = { openApps() }),
+            dockItem(c, R.drawable.ms_tune, "Ajustes", null, onClick = { startActivity(Intent(this, SoundActivity::class.java)) }),
+            dockItem(c, R.drawable.ms_contrast, modeName, null, onClick = { cycleTheme() }),
+            dockItem(c, R.drawable.ms_power, "Apagar pantalla", null, onClick = { startActivity(Intent(this, BlackoutActivity::class.java)) }),
+            dockItem(c, R.drawable.ms_apps, "Todas las apps", null, onClick = { openApps() }),
         )
         for (v in items) dock.addView(v, LinearLayout.LayoutParams(0, -1, 1f))
         dock.addView(View(this), LinearLayout.LayoutParams(dp(28), 1))
@@ -517,22 +519,29 @@ class MainActivity : Activity() {
     }
 
     /**
-     * Icono redondo, como los de un móvil Android. Con color: círculo de color y glifo blanco.
-     * Sin color (herramientas): círculo translúcido y glifo del color del texto.
+     * Icono redondo, como los iconos temáticos de un móvil Android.
+     * Con tono: círculo de color suave y símbolo del mismo tono.
+     * Sin tono (herramientas): círculo translúcido y símbolo del color del texto.
      */
-    private fun dockItem(c: Palette, icon: Int, description: String, color: Int?,
+    private fun dockItem(c: Palette, icon: Int, description: String, hue: Float?,
                          onClick: () -> Unit, onLong: (() -> Unit)? = null): View {
         val box = FrameLayout(this)
-        val size = if (color != null) dp(66) else dp(56)
+        val size = if (hue != null) dp(64) else dp(54)
+        val bg = when {
+            hue == null -> c.chip
+            c.dark -> androidx.core.graphics.ColorUtils.HSLToColor(floatArrayOf(hue, 0.26f, 0.27f))
+            else -> androidx.core.graphics.ColorUtils.HSLToColor(floatArrayOf(hue, 0.38f, 0.86f))
+        }
+        val fg = when {
+            hue == null -> c.text
+            c.dark -> androidx.core.graphics.ColorUtils.HSLToColor(floatArrayOf(hue, 0.50f, 0.82f))
+            else -> androidx.core.graphics.ColorUtils.HSLToColor(floatArrayOf(hue, 0.45f, 0.28f))
+        }
         val circle = FrameLayout(this).apply {
             contentDescription = description
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
-                setColor(color ?: c.chip)
-            }
-            if (color != null) {
-                elevation = dp(5).toFloat()
-                outlineProvider = ViewOutlineProvider.BACKGROUND
+                setColor(bg)
             }
             isClickable = true
             setOnClickListener { onClick() }
@@ -540,10 +549,11 @@ class MainActivity : Activity() {
             springy(0.86f)
         }
         box.addView(circle, FrameLayout.LayoutParams(size, size, Gravity.CENTER))
+        val glyph = if (hue != null) dp(30) else dp(26)
         circle.addView(ImageView(this).apply {
             setImageResource(icon)
-            setColorFilter(if (color != null) Color.WHITE else c.text, PorterDuff.Mode.SRC_IN)
-        }, FrameLayout.LayoutParams(if (color != null) dp(32) else dp(26), if (color != null) dp(32) else dp(26), Gravity.CENTER))
+            setColorFilter(fg, PorterDuff.Mode.SRC_IN)
+        }, FrameLayout.LayoutParams(glyph, glyph, Gravity.CENTER))
         return box
     }
 
