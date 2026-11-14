@@ -835,17 +835,20 @@ class MainActivity : Activity() {
         val art = md?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
             ?: md?.getBitmap(MediaMetadata.METADATA_KEY_ART)
         artView?.let { iv ->
+            // Sin portada no hay cuadro: el título ocupa el hueco y se ve más grande.
+            val texts = titleView?.parent as? View
             if (art != null) {
-                iv.clearColorFilter()
-                iv.scaleType = ImageView.ScaleType.CENTER_CROP
-                iv.setPadding(0, 0, 0, 0)
+                iv.visibility = View.VISIBLE
                 iv.setImageBitmap(art)
+                (texts?.layoutParams as? LinearLayout.LayoutParams)?.leftMargin = dp(20)
+                titleView?.textSize = 27f
             } else {
-                iv.setImageResource(R.drawable.ic_music)
-                iv.scaleType = ImageView.ScaleType.FIT_CENTER
-                iv.setColorFilter(p.accent, PorterDuff.Mode.SRC_IN)
-                iv.setPadding(dp(32), dp(32), dp(32), dp(32))
+                iv.visibility = View.GONE
+                iv.setImageDrawable(null)
+                (texts?.layoutParams as? LinearLayout.LayoutParams)?.leftMargin = 0
+                titleView?.textSize = 32f
             }
+            texts?.requestLayout()
         }
     }
 
