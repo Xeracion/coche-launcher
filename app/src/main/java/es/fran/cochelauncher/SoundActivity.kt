@@ -2,6 +2,7 @@ package es.fran.cochelauncher
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -29,7 +30,7 @@ class SoundActivity : Activity() {
     private lateinit var root: LinearLayout
     private lateinit var prefs: android.content.SharedPreferences
     private var tab = 0
-    private val tabs = listOf("Sonido", "Conducción", "Pantalla", "Arranque", "Avanzado")
+    private val tabs = listOf("Sonido", "Conducción", "Pantalla", "Gestos", "Arranque", "Avanzado")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -40,9 +41,9 @@ class SoundActivity : Activity() {
         window.statusBarColor = Color.TRANSPARENT
         root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = Backdrop(p.dark)
             setPadding(dp(20), dp(14), dp(20), dp(16))
         }
+        Look.applyBackground(this, root, p)
         setContentView(root)
         build()
     }
@@ -59,6 +60,12 @@ class SoundActivity : Activity() {
         if (hasFocus) hideSystemBars()
     }
 
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == Look.REQ_WALL && resultCode == RESULT_OK) Look.setWallpaper(this, data?.data) { build() }
+    }
+
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         build()
@@ -70,7 +77,7 @@ class SoundActivity : Activity() {
 
     private fun build() {
         p = Theme.palette(this)
-        root.background = Backdrop(p.dark)
+        Look.applyBackground(this, root, p)
         root.removeAllViews()
         root.addView(screenHeader(p, "Ajustes") { finish() })
 
@@ -109,7 +116,8 @@ class SoundActivity : Activity() {
             0 -> buildSound(content)
             1 -> buildDriving(content)
             2 -> buildScreen(content)
-            3 -> buildStartup(content)
+            3 -> buildGestures(content)
+            4 -> buildStartup(content)
             else -> buildAdvanced(content)
         }
     }
@@ -176,7 +184,50 @@ class SoundActivity : Activity() {
 
     // ---------- Pantalla ----------
 
+    private fun buildGestures(c: LinearLayout) {
+        c.addView(title("Gestos en la pantalla de inicio"))
+        c.addView(note("Toca un gesto para elegir lo que hace. Los gestos de tocar dos veces y mantener pulsado solo funcionan en zonas sin botones."))
+        for (g in Gestures.all) {
+            c.addView(View(this), LinearLayout.LayoutParams(1, dp(14)))
+            c.addView(TextView(this).apply {
+                text = g.title
+                setTextColor(p.text)
+                textSize = 17f
+            })
+            c.addView(actionButton(Gestures.actions[Gestures.action(this, g)] ?: "Nada") {
+                val keys = Gestures.actions.keys.toList()
+                AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                    .setTitle(g.title)
+                    .setItems(Gestures.actions.values.toTypedArray()) { _, which ->
+                        Gestures.set(this, g, keys[which])
+                        build()
+                    }
+                    .setNegativeButton("Cancelar", null)
+                    .show()
+            })
+        }
+        c.addView(View(this), LinearLayout.LayoutParams(1, dp(22)))
+        c.addView(title("Tarjeta de música"))
+        c.addView(note("Desliza hacia la izquierda para pasar a la canción siguiente y hacia la derecha para volver a la anterior."))
+    }
+
     private fun buildScreen(c: LinearLayout) {
+        c.addView(title("Fondo"))
+        val bg = listOf("wall", "texture")
+        c.addView(segment(listOf("Imagen de fondo", "Textura propia"), bg.indexOf(Look.bgMode(this)).coerceAtLeast(0)) { i ->
+            Look.setBgMode(this, bg[i])
+            build()
+        }, LinearLayout.LayoutParams(-1, dp(52)).apply { topMargin = dp(10); bottomMargin = dp(12) })
+        if (Look.bgMode(this) == "wall") {
+            c.addView(actionButton("Cambiar la imagen de fondo") { Look.pickWallpaper(this) })
+            c.addView(View(this), LinearLayout.LayoutParams(1, dp(10)))
+        }
+        c.addView(toggleRow("Colores del fondo", "Los botones y las tarjetas toman el color de la imagen de fondo.", Look.wallColors(this)) { v ->
+            Look.setWallColors(this, v)
+            build()
+        })
+        c.addView(View(this), LinearLayout.LayoutParams(1, dp(22)))
+
         c.addView(title("Tema"))
         val modes = listOf("auto", "dark", "light")
         c.addView(segment(listOf("Automático", "Oscuro", "Claro"), modes.indexOf(Theme.mode(this)).coerceAtLeast(0)) { i ->

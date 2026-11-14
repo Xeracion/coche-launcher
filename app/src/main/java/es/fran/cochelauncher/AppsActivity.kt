@@ -23,9 +23,9 @@ class AppsActivity : Activity() {
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = Backdrop(p.dark)
             setPadding(dp(20), dp(14), dp(20), 0)
         }
+        Look.applyBackground(this, root, p)
         root.addView(screenHeader(p, "Apps") { finish() })
 
         val grid = GridView(this).apply {
@@ -68,6 +68,12 @@ class AppsActivity : Activity() {
         }
         root.addView(grid, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(root)
+    }
+
+    override fun finish() {
+        super.finish()
+        @Suppress("DEPRECATION")
+        overridePendingTransition(R.anim.stay, R.anim.slide_down)
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {

@@ -25,7 +25,15 @@ object Theme {
         else -> !isDayNow(ctx)
     }
 
-    fun palette(ctx: Context): Palette = if (isDark(ctx)) Palette.DARK else Palette.LIGHT
+    fun palette(ctx: Context): Palette = paletteFor(ctx, isDark(ctx))
+
+    /** Paleta base; si está activado, teñida con el color del fondo de pantalla. */
+    fun paletteFor(ctx: Context, dark: Boolean): Palette {
+        val base = if (dark) Palette.DARK else Palette.LIGHT
+        if (!Look.wallColors(ctx)) return base
+        val seed = Look.seedColor(ctx) ?: return base
+        return Look.tint(base, seed)
+    }
 
     private fun isDayNow(ctx: Context): Boolean {
         val (lat, lon) = position(ctx)
