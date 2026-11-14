@@ -332,6 +332,21 @@ class SoundActivity : Activity() {
         })
         c.addView(View(this), LinearLayout.LayoutParams(1, dp(28)))
 
+        c.addView(title("Botón del asistente"))
+        c.addView(note("Comprueba si la radio deja pedir al móvil que abra su asistente de voz (Claude). Ten el móvil conectado por Bluetooth. Si funciona, el móvil abrirá el asistente."))
+        if (voiceReport.isNotEmpty()) {
+            c.addView(TextView(this).apply {
+                text = voiceReport
+                setTextColor(p.text)
+                textSize = 15f
+                setLineSpacing(0f, 1.25f)
+                background = cardBg(p, 16, p.chip)
+                setPadding(dp(16), dp(14), dp(16), dp(14))
+            }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
+        }
+        c.addView(actionButton(if (voiceReport.isEmpty()) "Probar asistente" else "Probar otra vez") { testVoice() })
+        c.addView(View(this), LinearLayout.LayoutParams(1, dp(28)))
+
         c.addView(title("Compartir apps de fábrica por wifi"))
         c.addView(note("Prepara un archivo con las apps de radio, teléfono y música Bluetooth del fabricante y lo ofrece en la wifi. Desde un ordenador conectado a la misma wifi, abre en el navegador la dirección que aparecerá aquí."))
         val addr = WifiShare.address()
@@ -369,6 +384,20 @@ class SoundActivity : Activity() {
     }
 
     private var btReport = ""
+    private var voiceReport = ""
+
+    private fun testVoice() {
+        if (Voice.needsPermission(this)) {
+            requestPermissions(arrayOf(android.Manifest.permission.BLUETOOTH_CONNECT), 78)
+            return
+        }
+        voiceReport = "Probando…"
+        build()
+        Thread {
+            val r = try { Voice.diagnose(this) } catch (e: Exception) { "Error: " + e.message }
+            runOnUiThread { voiceReport = r; build() }
+        }.start()
+    }
 
     private fun testBt(round: Boolean = false) {
         btReport = "Probando…"

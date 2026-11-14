@@ -79,6 +79,7 @@ class MainActivity : Activity() {
     private var slowSince = 0L
     private var speedLayoutAnim: ValueAnimator? = null
     private var ticks = 0
+    private val REQ_BT = 77
 
     private val ticker = object : Runnable {
         override fun run() {
@@ -140,6 +141,10 @@ class MainActivity : Activity() {
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQ_BT && grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+            assistant()
+            return
+        }
         startSpeed()
         DriveService.start(this)
         tick()
@@ -361,6 +366,10 @@ class MainActivity : Activity() {
                 onClick = { Apps.launch(this, app) },
                 onLong = { pickApp(slot) })
         }
+        // Asistente del móvil (Claude) por el manos libres.
+        items += dockItem(c, R.drawable.ic_assistant, "Asistente", c.accent, accent = true,
+            onClick = { assistant() },
+            onLong = { pickAssistant() })
         val modeName = when (Theme.mode(this)) {
             "dark" -> "Modo oscuro fijo"
             "light" -> "Modo claro fijo"
@@ -400,6 +409,34 @@ class MainActivity : Activity() {
             setColorFilter(if (accent) Color.WHITE else iconColor, PorterDuff.Mode.SRC_IN)
         }, FrameLayout.LayoutParams(dp(30), dp(30), Gravity.CENTER))
         return box
+    }
+
+    // ---------- asistente ----------
+
+    private fun assistant() {
+        if (Voice.savedTarget(this) == null && Voice.needsPermission(this)) {
+            requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), REQ_BT)
+            return
+        }
+        Voice.activate(this) { msg ->
+            if (msg != null) Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /** Mantener pulsado: elegir a mano una pantalla de fábrica de asistente, o volver a lo automático. */
+    private fun pickAssistant() {
+        val found = Voice.candidates(this)
+        val apps = found + Apps.all(this, refresh = true)
+        val labels = arrayOf("Automático (asistente del móvil)") +
+            found.map { "Fábrica: " + it.label }.toTypedArray() +
+            Apps.all(this).map { it.label }.toTypedArray()
+        AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle("Botón del asistente")
+            .setItems(labels) { _, which ->
+                Voice.saveTarget(this, if (which == 0) null else apps[which - 1].component)
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
     }
 
     private fun pickApp(slot: Slot) {
