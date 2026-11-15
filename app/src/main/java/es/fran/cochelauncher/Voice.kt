@@ -71,6 +71,7 @@ object Voice {
         Thread {
             val r = startOverHfp(app, StringBuilder())
             Diag.append(app, "asistente: manos libres -> " + r.name)
+            if (r == Result.OK) Thread { followSession(app, StringBuilder()) }.start()
             val msg = when (r) {
                 Result.OK -> null
                 Result.NO_PERMISSION -> "Falta el permiso de Bluetooth"
@@ -150,6 +151,55 @@ object Voice {
         }
     }
 
+    /**
+     * Mientras el asistente habla, la radio debe usar el canal de llamadas (nº 21) para que
+     * suene por los altavoces y escuche por el micrófono del coche. Al terminar, vuelve al canal de antes.
+     * Solo desde un hilo secundario.
+     */
+    private fun followSession(app: Context, sb: StringBuilder, maxMs: Long = 120_000) {
+        BtSwitch.connect(app)
+        try { Thread.sleep(300) } catch (e: InterruptedException) { }
+        val before = BtSwitch.currentSource()
+        val switched = BtSwitch.requestSource(BtSwitch.SRC_BT_PHONE)
+        sb.append("Paso al canal de llamadas (nº 21): ").append(if (switched) "hecho" else "la radio no lo aceptó").append('\n')
+        Diag.append(app, "asistente: canal 21 " + switched + ", antes " + before)
+
+        // Seguimos el audio de voz del manos libres: 2 = conectado, 0 = cortado.
+        val adapter = try { (app.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager?)?.adapter } catch (e: Exception) { null }
+        var proxy: BluetoothProfile? = null
+        val latch = CountDownLatch(1)
+        try {
+            adapter?.getProfileProxy(app, object : BluetoothProfile.ServiceListener {
+                override fun onServiceConnected(profile: Int, p: BluetoothProfile?) { proxy = p; latch.countDown() }
+                override fun onServiceDisconnected(profile: Int) {}
+            }, HEADSET_CLIENT)
+            latch.await(3, TimeUnit.SECONDS)
+        } catch (e: Exception) { }
+        val p = proxy
+        var sawAudio = false
+        val start = System.currentTimeMillis()
+        try {
+            val dev = try { p?.connectedDevices?.firstOrNull() } catch (e: Exception) { null }
+            val getState = try { p?.javaClass?.getMethod("getAudioState", BluetoothDevice::class.java) } catch (e: Throwable) { null }
+            while (p != null && dev != null && getState != null) {
+                val st = try { getState.invoke(p, dev) as? Int ?: -1 } catch (e: Throwable) { -1 }
+                if (st == 2) sawAudio = true
+                val elapsed = System.currentTimeMillis() - start
+                if (sawAudio && st == 0) break
+                if (!sawAudio && elapsed > 12_000) break
+                if (elapsed > maxMs) break
+                try { Thread.sleep(500) } catch (e: InterruptedException) { break }
+            }
+            if (getState == null) try { Thread.sleep(8_000) } catch (e: InterruptedException) { }
+        } finally {
+            try { if (p != null) adapter?.closeProfileProxy(HEADSET_CLIENT, p) } catch (e: Exception) { }
+        }
+        sb.append("Audio de voz del móvil: ").append(if (sawAudio) "llegó a la radio" else "no llegó").append('\n')
+        Diag.append(app, "asistente: audio de voz " + sawAudio)
+        // Volvemos al canal de antes.
+        if (before > 0 && before != BtSwitch.SRC_BT_PHONE) BtSwitch.requestSource(before)
+    }
+
     /** Pantallas de fábrica que parecen de asistente de voz, para elegir a mano. */
     fun candidates(ctx: Context): List<AppEntry> {
         val pm = ctx.packageManager
@@ -190,10 +240,9 @@ object Voice {
         val before = BtSwitch.run { connect(app); currentSource() }
         val r = startOverHfp(app, sb)
         if (r == Result.OK) {
-            try { Thread.sleep(1500) } catch (e: InterruptedException) { }
-            sb.append("Canal de audio de la radio: antes nº ").append(before)
-                .append(", ahora nº ").append(BtSwitch.currentSource()).append('\n')
-            sb.append("\nFunciona: el móvil debería abrir el asistente ahora.")
+            sb.append("Canal de audio de la radio al empezar: nº ").append(before).append('\n')
+            followSession(app, sb, maxMs = 25_000)
+            sb.append("\nLa orden llegó al móvil. Mira si el móvil abrió el asistente y si oíste algo por los altavoces.")
         } else {
             sb.append("\nNo funciona por esta vía.")
         }
