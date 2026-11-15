@@ -136,6 +136,8 @@ object Updater {
         } catch (e: Exception) {
             return "no se pudo preparar el archivo (" + e.javaClass.simpleName + ")"
         }
+        // El instalador lo pides tú: el vigilante del arranque no debe taparlo.
+        DriveService.userNavigatedAway = true
         val intent = Intent(Intent.ACTION_VIEW)
             .setDataAndType(uri, "application/vnd.android.package-archive")
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
