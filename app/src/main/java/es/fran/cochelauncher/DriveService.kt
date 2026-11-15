@@ -87,6 +87,9 @@ class DriveService : Service() {
         override fun onActivityPaused(a: Activity) {
             ownUiVisible = false
             Diag.append(a, "oculta " + a.javaClass.simpleName)
+            // Solo vigilamos la pantalla de inicio. Lo que se abre desde Ajustes u otras
+            // pantallas nuestras (instalador, permisos, apps) lo has pedido tú.
+            if (a !is MainActivity) return
             // Algo nos ha tapado: si fue solo y estamos cerca del arranque, reaccionamos.
             maybeReact()
         }

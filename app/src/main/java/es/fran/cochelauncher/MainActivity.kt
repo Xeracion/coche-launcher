@@ -28,7 +28,10 @@ import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
 import android.text.TextUtils
+import android.view.GestureDetector
 import android.view.Gravity
+import android.view.MotionEvent
+import android.view.ViewGroup
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewOutlineProvider
@@ -50,7 +53,7 @@ class MainActivity : Activity() {
     private lateinit var audio: AudioManager
     private val handler = Handler(Looper.getMainLooper())
     private var dark = true
-    private val p get() = if (dark) Palette.DARK else Palette.LIGHT
+    private val p get() = Theme.paletteFor(this, dark)
 
     private var clockView: TextView? = null
     private var dateView: TextView? = null
@@ -75,10 +78,13 @@ class MainActivity : Activity() {
     private var weatherTemp: TextView? = null
     private var weatherNote: TextView? = null
     private var speedBox: LinearLayout? = null
+    private var clockBox: LinearLayout? = null
+    private var speedClockView: TextView? = null
+    private var mediaCard: View? = null
     private var moving = false
     private var slowSince = 0L
-    private var speedLayoutAnim: ValueAnimator? = null
     private var ticks = 0
+    private val REQ_BT = 77
 
     private val ticker = object : Runnable {
         override fun run() {
@@ -133,6 +139,100 @@ class MainActivity : Activity() {
         if (hasFocus) hideSystemBars()
     }
 
+    // ---------- gestos ----------
+
+    private var downOnControl = false
+    private var downOnMedia = false
+    private var flung = false
+
+    private val gestures by lazy {
+        GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: MotionEvent) = true
+
+            override fun onDoubleTap(e: MotionEvent): Boolean {
+                if (!downOnControl) runGesture("g_double")
+                return true
+            }
+
+            override fun onLongPress(e: MotionEvent) {
+                if (!downOnControl) runGesture("g_long")
+            }
+
+            override fun onFling(e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float): Boolean {
+                val start = e1 ?: return false
+                val dx = e2.rawX - start.rawX
+                val dy = e2.rawY - start.rawY
+                val ax = kotlin.math.abs(dx)
+                val ay = kotlin.math.abs(dy)
+                // Deslizar en horizontal sobre la música: canción siguiente o anterior.
+                if (downOnMedia && ax > ay * 1.5f && ax > dp(80)) {
+                    flung = true
+                    mediaCmd(if (dx < 0) KeyEvent.KEYCODE_MEDIA_NEXT else KeyEvent.KEYCODE_MEDIA_PREVIOUS)
+                    mediaCard?.let { card ->
+                        card.animate().translationX(if (dx < 0) -dp(24).toFloat() else dp(24).toFloat()).setDuration(110)
+                            .withEndAction { card.animate().translationX(0f).setDuration(260).start() }.start()
+                    }
+                    return true
+                }
+                if (ay > ax * 1.5f && ay > dp(90)) {
+                    flung = true
+                    runGesture(if (dy < 0) "g_up" else "g_down")
+                    return true
+                }
+                return false
+            }
+        })
+    }
+
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
+            flung = false
+            downOnControl = hitsControl(root, ev.rawX, ev.rawY)
+            downOnMedia = mediaCard?.let { hits(it, ev.rawX, ev.rawY) } ?: false
+        }
+        gestures.onTouchEvent(ev)
+        if (flung && ev.actionMasked == MotionEvent.ACTION_UP) {
+            // El gesto ya hizo su trabajo: el botón que había debajo no debe pulsarse.
+            val cancel = MotionEvent.obtain(ev).apply { action = MotionEvent.ACTION_CANCEL }
+            super.dispatchTouchEvent(cancel)
+            cancel.recycle()
+            return true
+        }
+        return super.dispatchTouchEvent(ev)
+    }
+
+    private fun hits(v: View, x: Float, y: Float): Boolean {
+        val loc = IntArray(2)
+        v.getLocationOnScreen(loc)
+        return x >= loc[0] && y >= loc[1] && x <= loc[0] + v.width && y <= loc[1] + v.height
+    }
+
+    /** ¿El dedo cayó sobre un botón (y no en una zona vacía)? */
+    private fun hitsControl(v: View, x: Float, y: Float): Boolean {
+        if (v.visibility != View.VISIBLE || !hits(v, x, y)) return false
+        if (v !== root && (v.isClickable || v.isLongClickable)) return true
+        if (v is ViewGroup) for (i in 0 until v.childCount) if (hitsControl(v.getChildAt(i), x, y)) return true
+        return false
+    }
+
+    @Suppress("DEPRECATION")
+    private fun openApps() {
+        startActivity(Intent(this, AppsActivity::class.java))
+        overridePendingTransition(R.anim.slide_up, R.anim.stay)
+    }
+
+    private fun runGesture(key: String) {
+        when (Gestures.action(this, Gestures.byKey(key))) {
+            "apps" -> openApps()
+            "blackout" -> startActivity(Intent(this, BlackoutActivity::class.java))
+            "assistant" -> assistant()
+            "auto" -> Apps.launch(this, Apps.resolve(this, Slot.AUTO))
+            "phone" -> Apps.launch(this, Apps.resolve(this, Slot.PHONE))
+            "theme" -> cycleTheme()
+            "settings" -> startActivity(Intent(this, SoundActivity::class.java))
+        }
+    }
+
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
         // Es la pantalla de inicio: "atrás" no hace nada.
@@ -140,6 +240,10 @@ class MainActivity : Activity() {
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQ_BT && grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+            assistant()
+            return
+        }
         startSpeed()
         DriveService.start(this)
         tick()
@@ -148,9 +252,10 @@ class MainActivity : Activity() {
     // ---------- interfaz ----------
 
     private fun build() {
+        dark = Theme.isDark(this)
         val c = p
         root.removeAllViews()
-        root.background = Backdrop(c.dark)
+        Look.applyBackground(this, root, c)
         window.statusBarColor = Color.TRANSPARENT
         window.navigationBarColor = Color.TRANSPARENT
         val animate = !entered
@@ -158,65 +263,76 @@ class MainActivity : Activity() {
 
         val main = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(26), dp(14), dp(26), dp(16))
+            setPadding(dp(30), dp(20), dp(30), dp(12))
         }
         root.addView(main, FrameLayout.LayoutParams(-1, -1))
 
-        // Cabecera: hora a la izquierda, fecha a la derecha.
-        val header = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        main.addView(header, LinearLayout.LayoutParams(-1, dp(44)))
+        // Centro: reloj grande (o velocidad en marcha) a la izquierda, música a la derecha.
+        val mid = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        main.addView(mid, LinearLayout.LayoutParams(-1, 0, 1f))
+
+        val left = FrameLayout(this)
+        mid.addView(left, LinearLayout.LayoutParams(0, -1, 1f).apply { rightMargin = dp(22) })
+
+        // Reloj: el protagonista, como en los launchers de móvil.
+        val clockBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.START or Gravity.CENTER_VERTICAL
+            setPadding(dp(6), 0, 0, 0)
+        }
+        this.clockBox = clockBox
+        left.addView(clockBox, FrameLayout.LayoutParams(-1, -1))
         clockView = TextView(this).apply {
             setTextColor(c.text)
-            textSize = 30f
-            typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
-            letterSpacing = 0.02f
+            textSize = 104f
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            includeFontPadding = false
+            letterSpacing = -0.03f
+            setShadowLayer(dp(12).toFloat(), 0f, dp(2).toFloat(), if (c.dark) 0x66000000 else 0x33FFFFFF)
         }
-        header.addView(clockView)
-        header.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+        clockBox.addView(clockView)
+        dateView = TextView(this).apply {
+            setTextColor(c.text)
+            alpha = 0.85f
+            textSize = 22f
+            setPadding(dp(4), 0, 0, 0)
+        }
+        clockBox.addView(dateView, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(6) })
 
-        // El tiempo: solo aparece si hay internet.
+        // El tiempo, en una píldora bajo la fecha. Solo aparece si hay internet.
         weatherBox = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
             visibility = View.GONE
+            background = cardBg(c, 22)
+            setPadding(dp(16), dp(8), dp(18), dp(8))
         }
-        header.addView(weatherBox, LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(22) })
-        weatherNote = TextView(this).apply {
-            setTextColor(c.accent)
-            textSize = 16f
-        }
-        weatherBox!!.addView(weatherNote, LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(14) })
-        weatherIcon = ImageView(this).apply { setColorFilter(c.text, PorterDuff.Mode.SRC_IN) }
+        clockBox.addView(weatherBox, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(18) })
+        weatherIcon = ImageView(this).apply { setColorFilter(c.accent, PorterDuff.Mode.SRC_IN) }
         weatherBox!!.addView(weatherIcon, LinearLayout.LayoutParams(dp(26), dp(26)))
         weatherTemp = TextView(this).apply {
             setTextColor(c.text)
             textSize = 20f
-            typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
         }
-        weatherBox!!.addView(weatherTemp, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(8) })
+        weatherBox!!.addView(weatherTemp, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(10) })
+        weatherNote = TextView(this).apply {
+            setTextColor(c.sub)
+            textSize = 16f
+        }
+        weatherBox!!.addView(weatherNote, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(14) })
         Weather.last?.let { showWeather(it) }
 
-        dateView = TextView(this).apply {
-            setTextColor(c.sub)
-            textSize = 17f
-            letterSpacing = 0.02f
-        }
-        header.addView(dateView)
-
-        // Centro: velocidad a la izquierda, música a la derecha.
-        val mid = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        main.addView(mid, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(6) })
-
-        // La velocidad solo se ve en marcha. Parado, la música ocupa todo el ancho.
+        // Velocidad: sustituye al reloj mientras el coche se mueve.
         val speedBox = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            clipChildren = false
         }
         this.speedBox = speedBox
-        mid.addView(speedBox, LinearLayout.LayoutParams(0, -1, if (moving) 1f else 0f).apply {
-            rightMargin = if (moving) dp(18) else 0
-        })
-        if (!moving) speedBox.visibility = View.GONE
+        left.addView(speedBox, FrameLayout.LayoutParams(-1, -1))
+        speedClockView = TextView(this).apply {
+            setTextColor(c.sub)
+            textSize = 22f
+        }
+        speedBox.addView(speedClockView)
         speedView = TextView(this).apply {
             text = if (shownSpeed >= 0) shownSpeed.toString() else "--"
             setTextColor(c.text)
@@ -229,7 +345,7 @@ class MainActivity : Activity() {
         speedBox.addView(speedView)
         speedBox.addView(TextView(this).apply {
             text = "km/h"
-            setTextColor(c.sub)
+            setTextColor(c.accent)
             textSize = 20f
             letterSpacing = 0.08f
         })
@@ -238,16 +354,31 @@ class MainActivity : Activity() {
             textSize = 13f
         }
         speedBox.addView(speedHint, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(6) })
+        speedBox.visibility = if (moving) View.VISIBLE else View.GONE
+        clockBox.visibility = if (moving) View.GONE else View.VISIBLE
 
         val media = buildMediaCard(c)
-        mid.addView(media, LinearLayout.LayoutParams(0, -1, 1.5f))
+        this.mediaCard = media
+        mid.addView(media, LinearLayout.LayoutParams(0, -1, 1.25f))
 
-        // Barra inferior, solo iconos.
+        // Asa: indica que deslizando hacia arriba se abren todas las apps.
+        main.addView(View(this).apply {
+            background = GradientDrawable().apply {
+                cornerRadius = dp(3).toFloat()
+                setColor(c.text)
+            }
+            alpha = 0.35f
+        }, LinearLayout.LayoutParams(dp(44), dp(5)).apply {
+            gravity = Gravity.CENTER_HORIZONTAL
+            topMargin = dp(12)
+        })
+
+        // Dock flotante, solo iconos.
         val dock = buildDock(c, animate)
-        main.addView(dock, LinearLayout.LayoutParams(-1, dp(84)).apply { topMargin = dp(16) })
+        main.addView(dock, LinearLayout.LayoutParams(-1, dp(84)).apply { topMargin = dp(6) })
 
         if (animate) {
-            if (moving) speedBox.enter(0, 14)
+            (if (moving) speedBox else clockBox).enter(0, 14)
             media.enter(80, 20)
         }
         tick()
@@ -343,37 +474,43 @@ class MainActivity : Activity() {
         }
 
     private fun buildDock(c: Palette, animate: Boolean): View {
+        // Estilo dock de móvil: iconos redondos flotando, sin barra de fondo.
         val dock = LinearLayout(this).apply {
-            gravity = Gravity.CENTER_VERTICAL
-            background = cardBg(c, 32)
-            setPadding(dp(10), dp(8), dp(10), dp(8))
+            gravity = Gravity.CENTER
+            setPadding(dp(8), 0, dp(8), 0)
         }
         val items = mutableListOf<View>()
+        // Tono de color de cada icono (0-360). Los colores salen apagados, al estilo
+        // de los iconos temáticos de Android: fondo suave y símbolo del mismo tono.
         val mainApps = listOf(
-            Slot.PHONE to R.drawable.ic_phone,
-            Slot.RADIO to R.drawable.ic_radio,
-            Slot.BTMUSIC to R.drawable.ic_music,
-            Slot.AUTO to R.drawable.ic_car,
+            Triple(Slot.PHONE, R.drawable.ms_call, 150f),
+            Triple(Slot.RADIO, R.drawable.ms_radio, 32f),
+            Triple(Slot.BTMUSIC, R.drawable.ms_bluetooth, 262f),
+            Triple(Slot.AUTO, R.drawable.ms_car, 208f),
         )
-        for ((slot, icon) in mainApps) {
+        for ((slot, icon, hue) in mainApps) {
             val app = Apps.resolve(this, slot)
-            items += dockItem(c, icon, slot.title, c.accent, accent = true,
+            items += dockItem(c, icon, slot.title, hue,
                 onClick = { Apps.launch(this, app) },
                 onLong = { pickApp(slot) })
         }
+        // Asistente del móvil (Claude) por el manos libres.
+        items += dockItem(c, R.drawable.ms_mic, "Asistente", 16f,
+            onClick = { assistant() },
+            onLong = { pickAssistant() })
         val modeName = when (Theme.mode(this)) {
             "dark" -> "Modo oscuro fijo"
             "light" -> "Modo claro fijo"
             else -> "Modo automático"
         }
         val tools = listOf(
-            dockItem(c, R.drawable.ic_eq, "Ajustes", c.text, onClick = { startActivity(Intent(this, SoundActivity::class.java)) }),
-            dockItem(c, R.drawable.ic_theme, modeName, c.text, onClick = { cycleTheme() }),
-            dockItem(c, R.drawable.ic_power, "Apagar pantalla", c.text, onClick = { startActivity(Intent(this, BlackoutActivity::class.java)) }),
-            dockItem(c, R.drawable.ic_apps, "Todas las apps", c.text, onClick = { startActivity(Intent(this, AppsActivity::class.java)) }),
+            dockItem(c, R.drawable.ms_tune, "Ajustes", null, onClick = { startActivity(Intent(this, SoundActivity::class.java)) }),
+            dockItem(c, R.drawable.ms_contrast, modeName, null, onClick = { cycleTheme() }),
+            dockItem(c, R.drawable.ms_power, "Apagar pantalla", null, onClick = { startActivity(Intent(this, BlackoutActivity::class.java)) }),
+            dockItem(c, R.drawable.ms_apps, "Todas las apps", null, onClick = { openApps() }),
         )
         for (v in items) dock.addView(v, LinearLayout.LayoutParams(0, -1, 1f))
-        dock.addView(View(this).apply { setBackgroundColor(c.edge) }, LinearLayout.LayoutParams(dp(1), dp(36)).apply { leftMargin = dp(10); rightMargin = dp(10) })
+        dock.addView(View(this), LinearLayout.LayoutParams(dp(28), 1))
         for (v in tools) dock.addView(v, LinearLayout.LayoutParams(0, -1, 1f))
         if (animate) {
             (items + tools).forEachIndexed { i, v -> v.enter(140L + i * 45L) }
@@ -381,25 +518,71 @@ class MainActivity : Activity() {
         return dock
     }
 
-    private fun dockItem(c: Palette, icon: Int, description: String, iconColor: Int, accent: Boolean = false,
+    /**
+     * Icono redondo, como los iconos temáticos de un móvil Android.
+     * Con tono: círculo de color suave y símbolo del mismo tono.
+     * Sin tono (herramientas): círculo translúcido y símbolo del color del texto.
+     */
+    private fun dockItem(c: Palette, icon: Int, description: String, hue: Float?,
                          onClick: () -> Unit, onLong: (() -> Unit)? = null): View {
-        // Estilo baldosa: cada icono dentro de una tesela redondeada.
-        // Principales en azul con glifo blanco; herramientas en tesela neutra.
         val box = FrameLayout(this)
-        val tile = FrameLayout(this).apply {
+        val size = if (hue != null) dp(64) else dp(54)
+        val bg = when {
+            hue == null -> c.chip
+            c.dark -> androidx.core.graphics.ColorUtils.HSLToColor(floatArrayOf(hue, 0.26f, 0.27f))
+            else -> androidx.core.graphics.ColorUtils.HSLToColor(floatArrayOf(hue, 0.38f, 0.86f))
+        }
+        val fg = when {
+            hue == null -> c.text
+            c.dark -> androidx.core.graphics.ColorUtils.HSLToColor(floatArrayOf(hue, 0.50f, 0.82f))
+            else -> androidx.core.graphics.ColorUtils.HSLToColor(floatArrayOf(hue, 0.45f, 0.28f))
+        }
+        val circle = FrameLayout(this).apply {
             contentDescription = description
-            background = cardBg(c, 18, if (accent) c.accent else c.tile)
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(bg)
+            }
             isClickable = true
             setOnClickListener { onClick() }
             if (onLong != null) setOnLongClickListener { onLong(); true }
-            springy(0.84f)
+            springy(0.86f)
         }
-        box.addView(tile, FrameLayout.LayoutParams(dp(58), dp(58), Gravity.CENTER))
-        tile.addView(ImageView(this).apply {
+        box.addView(circle, FrameLayout.LayoutParams(size, size, Gravity.CENTER))
+        val glyph = if (hue != null) dp(30) else dp(26)
+        circle.addView(ImageView(this).apply {
             setImageResource(icon)
-            setColorFilter(if (accent) Color.WHITE else iconColor, PorterDuff.Mode.SRC_IN)
-        }, FrameLayout.LayoutParams(dp(30), dp(30), Gravity.CENTER))
+            setColorFilter(fg, PorterDuff.Mode.SRC_IN)
+        }, FrameLayout.LayoutParams(glyph, glyph, Gravity.CENTER))
         return box
+    }
+
+    // ---------- asistente ----------
+
+    private fun assistant() {
+        if (Voice.savedTarget(this) == null && Voice.needsPermission(this)) {
+            requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), REQ_BT)
+            return
+        }
+        Voice.activate(this) { msg ->
+            if (msg != null) Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /** Mantener pulsado: elegir a mano una pantalla de fábrica de asistente, o volver a lo automático. */
+    private fun pickAssistant() {
+        val found = Voice.candidates(this)
+        val apps = found + Apps.all(this, refresh = true)
+        val labels = arrayOf("Automático (asistente del móvil)") +
+            found.map { "Fábrica: " + it.label }.toTypedArray() +
+            Apps.all(this).map { it.label }.toTypedArray()
+        AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle("Botón del asistente")
+            .setItems(labels) { _, which ->
+                Voice.saveTarget(this, if (which == 0) null else apps[which - 1].component)
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
     }
 
     private fun pickApp(slot: Slot) {
@@ -420,6 +603,7 @@ class MainActivity : Activity() {
     private fun tick() {
         val now = Date()
         clockView?.text = SimpleDateFormat("HH:mm", Locale.getDefault()).format(now)
+        speedClockView?.text = clockView?.text
         val d = SimpleDateFormat("EEEE, d 'de' MMMM", Locale("es", "ES")).format(now)
         dateView?.text = d.replaceFirstChar { it.uppercase() }
 
@@ -549,42 +733,26 @@ class MainActivity : Activity() {
         animateSpeed(kmh)
     }
 
-    /** Muestra u oculta el bloque de velocidad con una transición suave del ancho. */
+    /** En marcha, la velocidad sustituye al reloj con un fundido cruzado. */
     private fun setMoving(on: Boolean) {
         if (on == moving) return
         moving = on
         slowSince = 0L
-        val box = speedBox ?: return
-        val lp = box.layoutParams as LinearLayout.LayoutParams
-        speedLayoutAnim?.cancel()
-        if (on) {
-            box.visibility = View.VISIBLE
-            box.alpha = 0f
-            box.translationX = -dp(30).toFloat()
-        }
-        val from = lp.weight
-        val to = if (on) 1f else 0f
-        speedLayoutAnim = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 650
-            interpolator = DecelerateInterpolator(1.6f)
-            addUpdateListener {
-                val t = it.animatedValue as Float
-                lp.weight = from + (to - from) * t
-                lp.rightMargin = (dp(18) * lp.weight).toInt()
-                box.layoutParams = lp
-                box.alpha = if (on) t else 1f - t * 1.6f
-                box.translationX = if (on) -dp(30) * (1f - t) else -dp(30) * t
-            }
-            addListener(object : android.animation.AnimatorListenerAdapter() {
-                override fun onAnimationEnd(animation: android.animation.Animator) {
-                    if (!moving) {
-                        box.visibility = View.GONE
-                        shownSpeed = -1
-                    }
-                }
-            })
-            start()
-        }
+        val show = (if (on) speedBox else clockBox) ?: return
+        val hide = (if (on) clockBox else speedBox) ?: return
+        hide.animate().cancel()
+        show.animate().cancel()
+        hide.animate().alpha(0f).translationY(-dp(14).toFloat()).setDuration(260).withEndAction {
+            hide.visibility = View.GONE
+            hide.alpha = 1f
+            hide.translationY = 0f
+            if (!moving) shownSpeed = -1
+        }.start()
+        show.visibility = View.VISIBLE
+        show.alpha = 0f
+        show.translationY = dp(14).toFloat()
+        show.animate().alpha(1f).translationY(0f).setStartDelay(180).setDuration(420)
+            .setInterpolator(DecelerateInterpolator(1.6f)).start()
     }
 
     /** La cifra cuenta hasta el valor nuevo en lugar de saltar. */
@@ -680,17 +848,20 @@ class MainActivity : Activity() {
         val art = md?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
             ?: md?.getBitmap(MediaMetadata.METADATA_KEY_ART)
         artView?.let { iv ->
+            // Sin portada no hay cuadro: el título ocupa el hueco y se ve más grande.
+            val texts = titleView?.parent as? View
             if (art != null) {
-                iv.clearColorFilter()
-                iv.scaleType = ImageView.ScaleType.CENTER_CROP
-                iv.setPadding(0, 0, 0, 0)
+                iv.visibility = View.VISIBLE
                 iv.setImageBitmap(art)
+                (texts?.layoutParams as? LinearLayout.LayoutParams)?.leftMargin = dp(20)
+                titleView?.textSize = 27f
             } else {
-                iv.setImageResource(R.drawable.ic_music)
-                iv.scaleType = ImageView.ScaleType.FIT_CENTER
-                iv.setColorFilter(p.accent, PorterDuff.Mode.SRC_IN)
-                iv.setPadding(dp(32), dp(32), dp(32), dp(32))
+                iv.visibility = View.GONE
+                iv.setImageDrawable(null)
+                (texts?.layoutParams as? LinearLayout.LayoutParams)?.leftMargin = 0
+                titleView?.textSize = 32f
             }
+            texts?.requestLayout()
         }
     }
 

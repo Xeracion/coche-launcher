@@ -25,7 +25,11 @@ object Theme {
         else -> !isDayNow(ctx)
     }
 
-    fun palette(ctx: Context): Palette = if (isDark(ctx)) Palette.DARK else Palette.LIGHT
+    fun palette(ctx: Context): Palette = paletteFor(ctx, isDark(ctx))
+
+    /** Paleta base teñida de azul mar. */
+    fun paletteFor(ctx: Context, dark: Boolean): Palette =
+        Look.tint(if (dark) Palette.DARK else Palette.LIGHT, Look.SEA)
 
     private fun isDayNow(ctx: Context): Boolean {
         val (lat, lon) = position(ctx)

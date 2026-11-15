@@ -2,6 +2,7 @@ package es.fran.cochelauncher
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -29,7 +30,7 @@ class SoundActivity : Activity() {
     private lateinit var root: LinearLayout
     private lateinit var prefs: android.content.SharedPreferences
     private var tab = 0
-    private val tabs = listOf("Sonido", "Conducción", "Pantalla", "Arranque", "Avanzado")
+    private val tabs = listOf("Sonido", "Conducción", "Pantalla", "Gestos", "Arranque", "Avanzado")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -40,9 +41,9 @@ class SoundActivity : Activity() {
         window.statusBarColor = Color.TRANSPARENT
         root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = Backdrop(p.dark)
             setPadding(dp(20), dp(14), dp(20), dp(16))
         }
+        Look.applyBackground(this, root, p)
         setContentView(root)
         build()
     }
@@ -70,7 +71,7 @@ class SoundActivity : Activity() {
 
     private fun build() {
         p = Theme.palette(this)
-        root.background = Backdrop(p.dark)
+        Look.applyBackground(this, root, p)
         root.removeAllViews()
         root.addView(screenHeader(p, "Ajustes") { finish() })
 
@@ -109,7 +110,8 @@ class SoundActivity : Activity() {
             0 -> buildSound(content)
             1 -> buildDriving(content)
             2 -> buildScreen(content)
-            3 -> buildStartup(content)
+            3 -> buildGestures(content)
+            4 -> buildStartup(content)
             else -> buildAdvanced(content)
         }
     }
@@ -175,6 +177,33 @@ class SoundActivity : Activity() {
     }
 
     // ---------- Pantalla ----------
+
+    private fun buildGestures(c: LinearLayout) {
+        c.addView(title("Gestos en la pantalla de inicio"))
+        c.addView(note("Toca un gesto para elegir lo que hace. Los gestos de tocar dos veces y mantener pulsado solo funcionan en zonas sin botones."))
+        for (g in Gestures.all) {
+            c.addView(View(this), LinearLayout.LayoutParams(1, dp(14)))
+            c.addView(TextView(this).apply {
+                text = g.title
+                setTextColor(p.text)
+                textSize = 17f
+            })
+            c.addView(actionButton(Gestures.actions[Gestures.action(this, g)] ?: "Nada") {
+                val keys = Gestures.actions.keys.toList()
+                AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                    .setTitle(g.title)
+                    .setItems(Gestures.actions.values.toTypedArray()) { _, which ->
+                        Gestures.set(this, g, keys[which])
+                        build()
+                    }
+                    .setNegativeButton("Cancelar", null)
+                    .show()
+            })
+        }
+        c.addView(View(this), LinearLayout.LayoutParams(1, dp(22)))
+        c.addView(title("Tarjeta de música"))
+        c.addView(note("Desliza hacia la izquierda para pasar a la canción siguiente y hacia la derecha para volver a la anterior."))
+    }
 
     private fun buildScreen(c: LinearLayout) {
         c.addView(title("Tema"))
@@ -332,6 +361,21 @@ class SoundActivity : Activity() {
         })
         c.addView(View(this), LinearLayout.LayoutParams(1, dp(28)))
 
+        c.addView(title("Botón del asistente"))
+        c.addView(note("Comprueba si la radio deja pedir al móvil que abra su asistente de voz (Claude). Ten el móvil conectado por Bluetooth. Si funciona, el móvil abrirá el asistente."))
+        if (voiceReport.isNotEmpty()) {
+            c.addView(TextView(this).apply {
+                text = voiceReport
+                setTextColor(p.text)
+                textSize = 15f
+                setLineSpacing(0f, 1.25f)
+                background = cardBg(p, 16, p.chip)
+                setPadding(dp(16), dp(14), dp(16), dp(14))
+            }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
+        }
+        c.addView(actionButton(if (voiceReport.isEmpty()) "Probar asistente" else "Probar otra vez") { testVoice() })
+        c.addView(View(this), LinearLayout.LayoutParams(1, dp(28)))
+
         c.addView(title("Compartir apps de fábrica por wifi"))
         c.addView(note("Prepara un archivo con las apps de radio, teléfono y música Bluetooth del fabricante y lo ofrece en la wifi. Desde un ordenador conectado a la misma wifi, abre en el navegador la dirección que aparecerá aquí."))
         val addr = WifiShare.address()
@@ -369,6 +413,20 @@ class SoundActivity : Activity() {
     }
 
     private var btReport = ""
+    private var voiceReport = ""
+
+    private fun testVoice() {
+        if (Voice.needsPermission(this)) {
+            requestPermissions(arrayOf(android.Manifest.permission.BLUETOOTH_CONNECT), 78)
+            return
+        }
+        voiceReport = "Probando…"
+        build()
+        Thread {
+            val r = try { Voice.diagnose(this) } catch (e: Exception) { "Error: " + e.message }
+            runOnUiThread { voiceReport = r; build() }
+        }.start()
+    }
 
     private fun testBt(round: Boolean = false) {
         btReport = "Probando…"

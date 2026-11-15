@@ -5,6 +5,8 @@ plugins {
 
 dependencies {
     implementation("androidx.core:core:1.13.1")
+    // Permite usar funciones ocultas de Android (aquí, la orden de asistente del manos libres).
+    implementation("org.lsposed.hiddenapibypass:hiddenapibypass:4.3")
 }
 
 android {
