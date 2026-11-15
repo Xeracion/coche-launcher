@@ -123,6 +123,13 @@ object Voice {
             }
             val dev = devices.first()
             sb.append("Móvil conectado: ").append(try { dev.name } catch (e: Exception) { "?" }).append('\n')
+            // Android esconde esta función a las apps normales; pedimos permiso para verla.
+            if (Build.VERSION.SDK_INT >= 28) {
+                val freed = try {
+                    org.lsposed.hiddenapibypass.HiddenApiBypass.addHiddenApiExemptions("Landroid/bluetooth/")
+                } catch (e: Throwable) { false }
+                sb.append("Acceso a funciones ocultas: ").append(if (freed) "conseguido" else "denegado").append('\n')
+            }
             val m = try {
                 p.javaClass.getMethod("startVoiceRecognition", BluetoothDevice::class.java)
             } catch (e: Throwable) {
